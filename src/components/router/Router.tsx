@@ -2,23 +2,12 @@ import { useEffect, useState, type MouseEvent, type ReactNode, type AnchorHTMLAt
 import { classNames } from '@/utils/format';
 
 function getHashPath(): string {
-  let hash = window.location.hash;
-  if (!hash) return '/';
-  if (hash.startsWith('#')) {
-    hash = hash.slice(1);
-  }
-  if (!hash.startsWith('/')) {
-    hash = '/' + hash;
-  }
-  return hash;
+  const hash = window.location.hash.slice(1);
+  return hash || '/';
 }
 
 export function navigate(path: string) {
-  let cleanPath = path;
-  if (!cleanPath.startsWith('/')) {
-    cleanPath = '/' + cleanPath;
-  }
-  window.location.hash = cleanPath;
+  window.location.hash = path;
   window.scrollTo({ top: 0, behavior: 'instant' as ScrollBehavior });
 }
 
@@ -38,9 +27,8 @@ export function useRoute(): string {
 }
 
 export function matchRoute(pattern: string, path: string): Record<string, string> | null {
-  const cleanPath = path.split('?')[0];
   const patternParts = pattern.split('/').filter(Boolean);
-  const pathParts = cleanPath.split('/').filter(Boolean);
+  const pathParts = path.split('/').filter(Boolean);
   if (patternParts.length !== pathParts.length) return null;
 
   const params: Record<string, string> = {};
@@ -61,9 +49,8 @@ interface LinkProps extends Omit<AnchorHTMLAttributes<HTMLAnchorElement>, 'href'
 }
 
 export function Link({ to, children, className, activeClass, onClick, ...props }: LinkProps) {
-  const current = getHashPath().split('?')[0];
-  const targetClean = to.split('?')[0];
-  const isActive = current === targetClean || (targetClean !== '/' && current.startsWith(targetClean));
+  const current = getHashPath();
+  const isActive = current === to || (to !== '/' && current.startsWith(to));
 
   function handleClick(e: MouseEvent<HTMLAnchorElement>) {
     e.preventDefault();
@@ -73,7 +60,7 @@ export function Link({ to, children, className, activeClass, onClick, ...props }
 
   return (
     <a
-      href={`#${to.startsWith('/') ? to : '/' + to}`}
+      href={`#${to}`}
       onClick={handleClick}
       className={classNames(className, isActive && activeClass)}
       {...props}
