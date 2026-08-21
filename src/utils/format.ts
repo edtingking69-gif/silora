@@ -73,5 +73,7 @@ export function truncate(text: string, max: number): string {
 }
 
 export function getOrderNumber(): string {
-  return 'SL' + Date.now().toString(36).toUpperCase() + Math.random().toString(36).slice(2, 5).toUpperCase();
+  const randomPart = Math.random().toString(36).substring(2, 6).toUpperCase();
+  const timestampPart = Date.now().toString(36).toUpperCase().slice(-5);
+  return `SL${timestampPart}${randomPart}`;
 }
