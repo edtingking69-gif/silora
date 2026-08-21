@@ -1,7 +1,7 @@
 {
   "name": "SILORA Admin",
   "short_name": "SILORA Admin",
-  "description": "SILORA Admin Portal — manage products, orders, payments and customers",
+  "description": "SILORA Admin Management",
   "start_url": "/#/admin",
   "scope": "/",
   "display": "standalone",
@@ -20,6 +20,18 @@
       "sizes": "512x512",
       "type": "image/svg+xml",
       "purpose": "any maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Admin Dashboard",
+      "url": "/#/admin/dashboard",
+      "description": "Open SILORA Admin Dashboard"
+    },
+    {
+      "name": "Admin Orders",
+      "url": "/#/admin/orders",
+      "description": "Manage SILORA Orders"
     }
   ]
 }
