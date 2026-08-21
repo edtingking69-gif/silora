@@ -5,11 +5,11 @@ import type { Order, OrderStatusHistory, Payment, DeliveryStatus, PaymentStatus 
 import { Button } from '@/components/ui/Button';
 import { Modal } from '@/components/ui/Modal';
 import { Badge } from '@/components/ui/Badge';
-import { Input, Select } from '@/components/ui/Input';
+import { Input, Textarea, Select } from '@/components/ui/Input';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { useToast } from '@/contexts/ToastContext';
-import { formatINR, formatDate, formatDateTime } from '@/utils/format';
-import { ShoppingCart, Search, Phone, Mail, MapPin, Truck, Check, X, Clock } from 'lucide-react';
+import { formatINR, formatDate, formatDateTime, classNames } from '@/utils/format';
+import { ShoppingCart, Search, Phone, Mail, MapPin, Package, Truck, Check, X, Clock } from 'lucide-react';
 
 const DELIVERY_STATUSES: DeliveryStatus[] = ['Pending', 'Confirmed', 'Processing', 'Packed', 'Shipped', 'Out for Delivery', 'Delivered', 'Cancelled', 'Returned'];
 const PAYMENT_STATUSES: PaymentStatus[] = ['Pending', 'Payment Submitted', 'Under Verification', 'Paid', 'Failed', 'Refunded', 'Cancelled'];
@@ -24,7 +24,124 @@ export function AdminOrders() {
   const [selected, setSelected] = useState<Order | null>(null);
   const [history, setHistory] = useState<OrderStatusHistory[]>([]);
   const [payments, setPayments] = useState<Payment[]>([]);
-  const [newStatus, setNewStatus] = useState<DeliveryStatus>('Pending');
+  const [newStatus, setNewStatus] = useState('');
+  const [courier, setCourier] = useState('');
+  const [tracking, setTracking] = useState('');
+  const [note, setNote] = useState('');
+  const [updating, setUpdating] = useState(false);
+
+  async function load() {
+    setLoading(true);
+    const o = await fetchAdminOrders();
+    setOrders(o);
+    setLoading(false);
+  }
+
+  useEffect(() => { load(); }, []);
+
+  async function openOrder(order: Order) {
+    setSelected(order);
+    setNewStatus(order.delivery_status);
+    setCourier(order.courier ?? '');
+    setTracking(order.tracking_number ?? '');
+    setNote('');
+    const [hist, pays] = await Promise.all([fetchOrderStatusHistory(order.id), fetchPaymentsByOrder(order.id)]);
+    setHistory(hist);
+    setPayments(pays);
+  }
+
+  async function handleUpdateStatus() {
+    if (!selected || !newStatus) return;
+    setUpdating(true);
+    try {
+      const { error } = await supabase
+        .from('orders')
+        .update({
+          delivery_status: newStatus,
+          courier: courier || null,
+          tracking_number: tracking || null,
+          delivery_notes: note || null,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', selected.id);
+      if (error) throw error;
+
+      await supabase.from('order_status_history').insert({
+        order_id: selected.id,
+        previous_status: selected.delivery_status,
+        new_status: newStatus,
+        note: note || `Updated by admin`,
+      });
+
+      toast('Delivery status updated');
+      const updated = await fetchAdminOrderById(selected.id);
+      if (updated) await openOrder(updated);
+      load();
+    } catch (err) {
+      toast(err instanceof Error ? err.message : 'Update failed', 'error');
+    } finally {
+      setUpdating(false);
+    }
+  }
+
+  async function handleUpdatePayment(paymentId: string, status: PaymentStatus) {
+    try {
+      // Update payment
+      await supabase
+        .from('payments')
+        .update({
+          status,
+          verified_at: status === 'Paid' ? new Date().toISOString() : null,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', paymentId);
+
+      // Update order payment status
+      if (selected) {
+        await supabase
+          .from('orders')
+          .update({
+            payment_status: status,
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', selected.id);
+      }
+
+      await supabase.from('payment_status_history').insert({
+        payment_id: paymentId,
+        previous_status: selected?.payment_status ?? 'Pending',
+        new_status: status,
+        note: `Payment marked as ${status} by admin`,
+      });
+
+      <dyad-write path="src/pages/admin/AdminOrders.tsx" description="Completing AdminOrders with updated payment verification options and status badges">
+import { useEffect, useState } from 'react';
+import { supabase } from '@/lib/supabase';
+import { fetchAdminOrders, fetchAdminOrderById, fetchOrderStatusHistory, fetchPaymentsByOrder } from '@/services/api';
+import type { Order, OrderStatusHistory, Payment, DeliveryStatus, PaymentStatus } from '@/types';
+import { Button } from '@/components/ui/Button';
+import { Modal } from '@/components/ui/Modal';
+import { Badge } from '@/components/ui/Badge';
+import { Input, Textarea, Select } from '@/components/ui/Input';
+import { EmptyState } from '@/components/ui/EmptyState';
+import { useToast } from '@/contexts/ToastContext';
+import { formatINR, formatDate, formatDateTime } from '@/utils/format';
+import { ShoppingCart, Search, Phone, Mail, MapPin, Package, Truck, Check, X, Clock } from 'lucide-react';
+
+const DELIVERY_STATUSES: DeliveryStatus[] = ['Pending', 'Confirmed', 'Processing', 'Packed', 'Shipped', 'Out for Delivery', 'Delivered', 'Cancelled', 'Returned'];
+const PAYMENT_STATUSES: PaymentStatus[] = ['Pending', 'Payment Submitted', 'Under Verification', 'Paid', 'Failed', 'Refunded', 'Cancelled'];
+
+export function AdminOrders() {
+  const { toast } = useToast();
+  const [orders, setOrders] = useState<Order[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [search, setSearch] = useState('');
+  const [filterPayment, setFilterPayment] = useState('');
+  const [filterDelivery, setFilterDelivery] = useState('');
+  const [selected, setSelected] = useState<Order | null>(null);
+  const [history, setHistory] = useState<OrderStatusHistory[]>([]);
+  const [payments, setPayments] = useState<Payment[]>([]);
+  const [newStatus, setNewStatus] = useState('');
   const [courier, setCourier] = useState('');
   const [tracking, setTracking] = useState('');
   const [note, setNote] = useState('');
@@ -141,11 +258,11 @@ export function AdminOrders() {
         </div>
         <select value={filterPayment} onChange={(e) => setFilterPayment(e.target.value)} className="h-10 rounded-xl border border-ink-300 bg-white px-3 text-sm">
           <option value="">All Payments</option>
-          {PAYMENT_STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
+          {PAYMENT_STATUSES.map((s) => <option key={s}>{s}</option>)}
         </select>
         <select value={filterDelivery} onChange={(e) => setFilterDelivery(e.target.value)} className="h-10 rounded-xl border border-ink-300 bg-white px-3 text-sm">
           <option value="">All Delivery</option>
-          {DELIVERY_STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
+          {DELIVERY_STATUSES.map((s) => <option key={s}>{s}</option>)}
         </select>
       </div>
 
@@ -274,7 +391,7 @@ export function AdminOrders() {
               <h3 className="text-sm font-bold text-ink-900 mb-3">Delivery Management</h3>
               <div className="grid gap-3 sm:grid-cols-2">
                 <Select label="Status" value={newStatus} onChange={(e) => setNewStatus(e.target.value as DeliveryStatus)}>
-                  {DELIVERY_STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
+                  {DELIVERY_STATUSES.map((s) => <option key={s}>{s}</option>)}
                 </Select>
                 <Input label="Courier" value={courier} onChange={(e) => setCourier(e.target.value)} placeholder="e.g. Delhivery" />
                 <Input label="Tracking Number" value={tracking} onChange={(e) => setTracking(e.target.value)} placeholder="Tracking ID" />
