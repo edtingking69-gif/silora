@@ -157,7 +157,7 @@ export function CartPage() {
             <Button onClick={() => navigate('/checkout')} className="mt-5 w-full" size="lg">
               Proceed to Checkout
             </Button>
-            <p className="mt-3 text-center text-xs text-ink-400">Secure checkout · UPI & COD available</p>
+            <p className="mt-3 text-center text-xs text-ink-400">Secure online checkout · Fast UPI & QR payments</p>
           </div>
         </div>
       </div>

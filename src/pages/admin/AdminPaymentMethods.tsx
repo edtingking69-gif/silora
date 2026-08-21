@@ -10,7 +10,7 @@ import { EmptyState } from '@/components/ui/EmptyState';
 import { useToast } from '@/contexts/ToastContext';
 import { Plus, Pencil, Trash2, CreditCard, QrCode as QrIcon } from 'lucide-react';
 
-const TYPES: PaymentMethodType[] = ['upi', 'upi_qr', 'cod', 'gateway', 'other'];
+const TYPES: PaymentMethodType[] = ['upi', 'upi_qr', 'gateway', 'other'];
 
 export function AdminPaymentMethods() {
   const { toast } = useToast();
@@ -38,7 +38,7 @@ export function AdminPaymentMethods() {
 
   function openEdit(m: PaymentMethod) {
     setEditing(m);
-    setForm({ name: m.name, type: m.type, description: m.description ?? '', instructions: m.instructions ?? '', upi_id: m.upi_id ?? '', enabled: m.enabled, display_order: String(m.display_order) });
+    setForm({ name: m.name, type: m.type === 'cod' ? 'upi' : m.type, description: m.description ?? '', instructions: m.instructions ?? '', upi_id: m.upi_id ?? '', enabled: m.enabled, display_order: String(m.display_order) });
     setShowModal(true);
   }
 
@@ -71,9 +71,13 @@ export function AdminPaymentMethods() {
 
   async function handleDelete() {
     if (!deleteId) return;
-    const { error } = await supabase.from('payment_methods').delete().eq('id', deleteId);
-    if (error) { toast(error.message, 'error'); return; }
-    toast('Deleted');
+    // Disable instead of delete if it is referenced
+    const { error } = await supabase.from('payment_methods').update({ enabled: false }).eq('id', deleteId);
+    if (error) {
+      toast(error.message, 'error');
+      return;
+    }
+    toast('Payment method disabled');
     setDeleteId(null);
     load();
   }
@@ -88,7 +92,7 @@ export function AdminPaymentMethods() {
       {loading ? (
         <div className="space-y-2">{[1,2].map((i) => <div key={i} className="h-20 rounded-2xl bg-ink-100 animate-shimmer" />)}</div>
       ) : methods.length === 0 ? (
-        <EmptyState icon={<CreditCard className="h-8 w-8" />} title="No payment methods" message="Add payment methods for checkout." action={<Button onClick={openAdd} size="sm"><Plus className="h-4 w-4" /> Add</Button>} />
+        <EmptyState icon={<CreditCard className="h-8 w-8" />} title="No payment methods" message="Add online payment methods for checkout." action={<Button onClick={openAdd} size="sm"><Plus className="h-4 w-4" /> Add</Button>} />
       ) : (
         <div className="space-y-2">
           {methods.map((m) => (
@@ -103,7 +107,9 @@ export function AdminPaymentMethods() {
               <Badge variant={m.enabled ? 'success' : 'default'}>{m.enabled ? 'Enabled' : 'Disabled'}</Badge>
               <div className="flex gap-1">
                 <button onClick={() => openEdit(m)} className="rounded-lg p-2 text-ink-500 hover:bg-ink-100"><Pencil className="h-4 w-4" /></button>
-                <button onClick={() => setDeleteId(m.id)} className="rounded-lg p-2 text-error-500 hover:bg-error-50"><Trash2 className="h-4 w-4" /></button>
+                {m.enabled && (
+                  <button onClick={() => setDeleteId(m.id)} className="rounded-lg p-2 text-error-500 hover:bg-error-50" title="Disable"><Trash2 className="h-4 w-4" /></button>
+                )}
               </div>
             </div>
           ))}
@@ -112,7 +118,7 @@ export function AdminPaymentMethods() {
 
       <Modal open={showModal} onClose={() => setShowModal(false)} title={editing ? 'Edit Payment Method' : 'Add Payment Method'}>
         <div className="space-y-4">
-          <Input label="Name *" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="e.g. UPI Payment" />
+          <Input label="Name *" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="e.g. UPI QR Payment" />
           <Select label="Type" value={form.type} onChange={(e) => setForm({ ...form, type: e.target.value as PaymentMethodType })}>
             {TYPES.map((t) => <option key={t} value={t}>{t.toUpperCase()}</option>)}
           </Select>
@@ -131,7 +137,7 @@ export function AdminPaymentMethods() {
         </div>
       </Modal>
 
-      <ConfirmDialog open={!!deleteId} onClose={() => setDeleteId(null)} onConfirm={handleDelete} title="Delete Payment Method" message="This will remove the payment method and its QR codes." confirmLabel="Delete" danger />
+      <ConfirmDialog open={!!deleteId} onClose={() => setDeleteId(null)} onConfirm={handleDelete} title="Disable Payment Method" message="This will disable the payment method so customers cannot select it at checkout." confirmLabel="Disable" danger />
     </div>
   );
 }

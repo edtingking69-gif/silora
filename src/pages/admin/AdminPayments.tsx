@@ -7,7 +7,7 @@ import { Modal } from '@/components/ui/Modal';
 import { Badge } from '@/components/ui/Badge';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { useToast } from '@/contexts/ToastContext';
-import { formatINR, formatDateTime, classNames } from '@/utils/format';
+import { formatINR, formatDateTime } from '@/utils/format';
 import { CreditCard, Search, Check, X, Clock, RotateCcw } from 'lucide-react';
 
 const PAYMENT_STATUSES: PaymentStatus[] = ['Pending', 'Payment Submitted', 'Under Verification', 'Paid', 'Failed', 'Refunded', 'Cancelled'];
@@ -38,10 +38,41 @@ export function AdminPayments() {
 
   async function handleUpdate(paymentId: string, status: PaymentStatus) {
     try {
-      const { error } = await supabase.rpc('update_payment_status', { p_payment_id: paymentId, p_new_status: status });
-      if (error) throw error;
+      // Update payment record
+      await supabase
+        .from('payments')
+        .update({
+          status,
+          verified_at: status === 'Paid' ? new Date().toISOString() : null,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', paymentId);
+
+      // Also update linked order if present
+      if (selected?.order_id) {
+        await supabase
+          .from('orders')
+          .update({
+            payment_status: status,
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', selected.order_id);
+      }
+
+      await supabase.from('payment_status_history').insert({
+        payment_id: paymentId,
+        previous_status: selected?.status ?? 'Pending',
+        new_status: status,
+        note: `Payment marked as ${status} by admin (Verification Window: 6:00 PM - 10:00 PM)`,
+      });
+
       toast(`Payment marked as ${status}`);
-      if (selected) { await openPayment(selected); load(); }
+      load();
+      if (selected) {
+        setSelected({ ...selected, status });
+        const h = await fetchPaymentStatusHistory(paymentId);
+        setHistory(h);
+      }
     } catch (err) {
       toast(err instanceof Error ? err.message : 'Update failed', 'error');
     }
@@ -49,7 +80,7 @@ export function AdminPayments() {
 
   const filtered = payments.filter((p) => {
     if (filter && p.status !== filter) return false;
-    if (search && !p.payment_method_name?.toLowerCase().includes(search.toLowerCase()) && !p.id.includes(search)) return false;
+    if (search && !p.payment_method_name?.toLowerCase().includes(search.toLowerCase()) && !p.id.includes(search) && !p.payment_reference?.toLowerCase().includes(search.toLowerCase())) return false;
     return true;
   });
 
@@ -60,7 +91,7 @@ export function AdminPayments() {
       <div className="flex gap-2 flex-wrap">
         <div className="relative flex-1 min-w-[180px]">
           <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-ink-400" />
-          <input type="search" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search..." className="h-10 w-full rounded-xl border border-ink-300 bg-white pl-9 pr-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500/30" />
+          <input type="search" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search by reference or method..." className="h-10 w-full rounded-xl border border-ink-300 bg-white pl-9 pr-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500/30" />
         </div>
         <select value={filter} onChange={(e) => setFilter(e.target.value)} className="h-10 rounded-xl border border-ink-300 bg-white px-3 text-sm">
           <option value="">All Statuses</option>
@@ -74,18 +105,25 @@ export function AdminPayments() {
         <EmptyState icon={<CreditCard className="h-8 w-8" />} title="No payments" message="Payment records will appear here." />
       ) : (
         <div className="space-y-2">
-          {filtered.map((p) => (
-            <button key={p.id} onClick={() => openPayment(p)} className="w-full text-left rounded-2xl border border-ink-100 bg-white p-4 hover:shadow-card-hover transition-all">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm font-bold text-ink-900">{formatINR(p.amount)}</p>
-                  <p className="text-xs text-ink-500">{p.payment_method_name} · {formatDateTime(p.created_at)}</p>
+          {filtered.map((p) => {
+            const isAwaitingVerification = p.status === 'Payment Submitted' || p.status === 'Under Verification';
+            return (
+              <button key={p.id} onClick={() => openPayment(p)} className="w-full text-left rounded-2xl border border-ink-100 bg-white p-4 hover:shadow-card-hover transition-all">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm font-bold text-ink-900">{formatINR(p.amount)}</p>
+                    <p className="text-xs text-ink-500">{p.payment_method_name ?? 'UPI / QR'} · {formatDateTime(p.created_at)}</p>
+                  </div>
+                  <Badge variant={p.status === 'Paid' ? 'success' : p.status === 'Failed' || p.status === 'Cancelled' ? 'error' : isAwaitingVerification ? 'warning' : 'info'}>
+                    {isAwaitingVerification ? 'Payment Submitted — Awaiting Verification' : p.status}
+                  </Badge>
                 </div>
-                <Badge variant={p.status === 'Paid' ? 'success' : p.status === 'Failed' || p.status === 'Cancelled' ? 'error' : p.status === 'Refunded' ? 'warning' : 'info'}>{p.status}</Badge>
-              </div>
-              {p.payment_reference && <p className="mt-1.5 text-xs text-ink-600">Ref: <span className="font-mono">{p.payment_reference}</span></p>}
-            </button>
-          ))}
+                {p.payment_reference && (
+                  <p className="mt-1.5 text-xs text-ink-700 font-medium">Ref / UTR: <span className="font-mono font-bold">{p.payment_reference}</span></p>
+                )}
+              </button>
+            );
+          })}
         </div>
       )}
 
@@ -94,23 +132,51 @@ export function AdminPayments() {
           <div className="space-y-4">
             <div className="rounded-xl bg-ink-50 p-4 space-y-1.5 text-sm">
               <div className="flex justify-between"><span className="text-ink-600">Amount</span><span className="font-bold text-ink-900">{formatINR(selected.amount)}</span></div>
-              <div className="flex justify-between"><span className="text-ink-600">Method</span><span className="font-semibold">{selected.payment_method_name}</span></div>
-              <div className="flex justify-between"><span className="text-ink-600">Status</span><Badge variant={selected.status === 'Paid' ? 'success' : selected.status === 'Failed' || selected.status === 'Cancelled' ? 'error' : 'warning'}>{selected.status}</Badge></div>
-              {selected.payment_reference && <div className="flex justify-between"><span className="text-ink-600">Reference</span><span className="font-mono text-xs">{selected.payment_reference}</span></div>}
-              {selected.submitted_at && <div className="flex justify-between"><span className="text-ink-600">Submitted</span><span>{formatDateTime(selected.submitted_at)}</span></div>}
-              {selected.verified_at && <div className="flex justify-between"><span className="text-ink-600">Verified</span><span>{formatDateTime(selected.verified_at)}</span></div>}
+              <div className="flex justify-between"><span className="text-ink-600">Method</span><span className="font-semibold">{selected.payment_method_name ?? 'UPI / QR'}</span></div>
+              <div className="flex justify-between items-center">
+                <span className="text-ink-600">Status</span>
+                <Badge variant={selected.status === 'Paid' ? 'success' : selected.status === 'Failed' || selected.status === 'Cancelled' ? 'error' : 'warning'}>
+                  {selected.status === 'Payment Submitted' ? 'Payment Submitted — Awaiting Verification' : selected.status}
+                </Badge>
+              </div>
+              {selected.payment_reference && (
+                <div className="flex justify-between"><span className="text-ink-600">Reference / UTR</span><span className="font-mono font-bold text-ink-900">{selected.payment_reference}</span></div>
+              )}
+              {selected.submitted_at && (
+                <div className="flex justify-between"><span className="text-ink-600">Submitted</span><span>{formatDateTime(selected.submitted_at)}</span></div>
+              )}
+              {selected.verified_at && (
+                <div className="flex justify-between"><span className="text-ink-600">Verified</span><span>{formatDateTime(selected.verified_at)}</span></div>
+              )}
             </div>
 
-            {selected.status !== 'Paid' && selected.status !== 'Cancelled' && (
-              <div className="flex gap-2 flex-wrap">
-                <Button size="sm" variant="success" onClick={() => handleUpdate(selected.id, 'Paid')}><Check className="h-3.5 w-3.5" /> Mark Paid</Button>
-                <Button size="sm" variant="outline" onClick={() => handleUpdate(selected.id, 'Under Verification')}><Clock className="h-3.5 w-3.5" /> Under Verification</Button>
-                <Button size="sm" variant="danger" onClick={() => handleUpdate(selected.id, 'Failed')}><X className="h-3.5 w-3.5" /> Mark Failed</Button>
-              </div>
-            )}
-            {selected.status === 'Paid' && (
-              <Button size="sm" variant="outline" onClick={() => handleUpdate(selected.id, 'Refunded')}><RotateCcw className="h-3.5 w-3.5" /> Issue Refund</Button>
-            )}
+            <div className="rounded-xl bg-primary-50/70 p-3 text-xs text-primary-900">
+              <Clock className="h-3.5 w-3.5 inline mr-1 text-primary-700" />
+              Manual verification window: <strong>6:00 PM – 10:00 PM</strong>. Verify the transaction in your bank/UPI app, then select <strong>Paid</strong> or <strong>Failed</strong>.
+            </div>
+
+            <div className="flex gap-2 flex-wrap pt-1">
+              {selected.status !== 'Paid' && (
+                <Button size="sm" variant="success" onClick={() => handleUpdate(selected.id, 'Paid')}>
+                  <Check className="h-3.5 w-3.5 mr-1" /> Mark Paid
+                </Button>
+              )}
+              {selected.status !== 'Failed' && (
+                <Button size="sm" variant="danger" onClick={() => handleUpdate(selected.id, 'Failed')}>
+                  <X className="h-3.5 w-3.5 mr-1" /> Mark Failed
+                </Button>
+              )}
+              {selected.status !== 'Under Verification' && selected.status !== 'Paid' && (
+                <Button size="sm" variant="outline" onClick={() => handleUpdate(selected.id, 'Under Verification')}>
+                  Under Verification
+                </Button>
+              )}
+              {selected.status === 'Paid' && (
+                <Button size="sm" variant="outline" onClick={() => handleUpdate(selected.id, 'Refunded')}>
+                  <RotateCcw className="h-3.5 w-3.5 mr-1" /> Issue Refund
+                </Button>
+              )}
+            </div>
 
             {history.length > 0 && (
               <div>

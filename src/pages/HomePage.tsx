@@ -31,7 +31,6 @@ export function HomePage() {
       setNewArrivals(n);
       setBestsellers(b);
       setCategories(c);
-      // pick a product with high discount for special offer
       const all = [...f, ...b, ...t];
       const offer = all
         .filter((p) => p.original_price && discountPercent(Number(p.price), Number(p.original_price)) >= 20)
@@ -120,7 +119,7 @@ export function HomePage() {
         <div className="container-silora grid grid-cols-2 gap-4 py-6 md:grid-cols-4 md:gap-8">
           {[
             { icon: Truck, title: 'Fast Delivery', desc: 'Across India' },
-            { icon: ShieldCheck, title: 'Secure Payments', desc: 'UPI & COD' },
+            { icon: ShieldCheck, title: 'Secure Payments', desc: '100% Verified UPI' },
             { icon: RotateCcw, title: 'Easy Returns', desc: '7-day return' },
             { icon: Headphones, title: '24/7 Support', desc: 'Always here' },
           ].map((item) => (

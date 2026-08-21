@@ -224,7 +224,7 @@ export function StoreLayout({ children }: { children: ReactNode }) {
             <div className="flex items-center gap-3 text-xs text-ink-500">
               <span>Secure Payments</span>
               <span>•</span>
-              <span>UPI / COD</span>
+              <span>UPI & QR Payments</span>
               <span>•</span>
               <span>Fast Delivery</span>
             </div>

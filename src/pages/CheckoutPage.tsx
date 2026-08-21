@@ -12,246 +12,13 @@ import {
   submitOrderPayment,
   type PlaceOrderResult,
 } from '@/services/api';
-import type { Address, PaymentMethod, ShippingConfig, Coupon, DeliveryStatus, PaymentStatus } from '@/types';
-import { Button } from '@/components/ui/Button';
-import { Input, Select } from '@/components/ui/Input';
-import { EmptyState } from '@/components/ui/EmptyState';
-import { Badge } from '@/components/ui/Badge';
-import { formatINR, classNames } from '@/utils/format';
-import { Check, ChevronRight, MapPin, CreditCard, ShoppingBag, Tag, Truck, Copy, QrCode, ArrowRight, ShieldCheck } from 'lucide-react';
-
-type Step = 1 | 2 | 3;
-
-export function CheckoutPage() {
-  const { items, refresh: refreshCart } = useCart();
-  const { user, profile } = useAuth();
-  const { toast } = useToast();
-
-  const [step, setStep] = useState<Step>(1);
-  const [addresses, setAddresses] = useState<Address[]>([]);
-  const [selectedAddressId, setSelectedAddressId] = useState<string>('');
-  const [newAddress, setNewAddress] = useState({
-    full_name: profile?.full_name ?? '',
-    mobile: profile?.mobile ?? '',
-    line1: '',
-    line2: '',
-    city: '',
-    state: '',
-    pincode: '',
-    label: 'Home',
-  });
-  const [useNew, setUseNew] = useState(false);
-
-  const [paymentMethods, setPaymentMethods] = useState<PaymentMethod[]>([]);
-  const [selectedMethod, setSelectedMethod] = useState<string>('');
-  const [shippingConfig, setShippingConfig] = useState<ShippingConfig | null>(null);
-
-  const [couponCode, setCouponCode] = useState('');
-  const [appliedCoupon, setAppliedCoupon] = useState<Coupon | null>(null);
-  const [discount, setDiscount] = useState(0);
-  const [couponError, setCouponError] = useState('');
-
-  const [placing, setPlacing] = useState(false);
-  const [orderResult, setOrderResult] = useState<PlaceOrderResult | null>(null);
-  const [paymentSubmitted, setPaymentSubmitted] = useState(false);
-  const [paymentRef, setPaymentRef] = useState('');
-
-  useEffect(() => {
-    if (!user) {
-      navigate('/login');
-      return;
-    }
-    fetchUserAddresses(user.id).then((a) => {
-      setAddresses(a);
-      const def = a.find((x) => x.is_default);
-      setSelectedAddressId(def?.id ?? a[0]?.id ?? '');
-      if (a.length === 0) setUseNew(true);
-    });
-    fetchPaymentMethods().then((m) => {
-      setPaymentMethods(m);
-      if (m.length > 0) {
-        setSelectedMethod(m[0].id);
-      }
-    });
-    fetchShippingConfig().then(setShippingConfig);
-  }, [user]);
-
-  const subtotal = items.reduce((sum, i) => {
-    const price = i.variant?.price_override ? Number(i.variant.price_override) : Number(i.product?.price ?? 0);
-    return sum + price * i.quantity;
-  }, 0);
-
-  const shippingFee = shippingConfig?.shipping_fee ?? 0;
-  const freeThreshold = shippingConfig?.free_shipping_threshold ?? 0;
-  const freeEnabled = shippingConfig?.enabled ?? true;
-  const shipping = freeEnabled && (freeThreshold === 0 || subtotal >= freeThreshold) ? 0 : shippingFee;
-  const total = Math.max(0, subtotal - discount + shipping);
-
-  async function handleApplyCoupon() {
-    if (!couponCode.trim()) return;
-    setCouponError('');
-    const { coupon, discount: disc, error } = await validateCoupon(couponCode, subtotal);
-    if (error) {
-      setCouponError(error);
-      setAppliedCoupon(null);
-      setDiscount(0);
-      return;
-    }
-    setAppliedCoupon(coupon);
-    setDiscount(disc);
-    toast(`Coupon ${coupon!.code} applied! You saved ${formatINR(disc)}`);
-  }
-
-  function validateStep1(): boolean {
-    if (useNew) {
-      if (!newAddress.full_name || !newAddress.mobile || !newAddress.line1 || !newAddress.city || !newAddress.state || !newAddress.pincode) {
-        toast('Please fill all required address fields', 'error');
-        return false;
-      }
-      if (!/^\d{6}$/.test(newAddress.pincode.trim())) {
-        toast('Please enter a valid 6-digit pincode', 'error');
-        return false;
-      }
-    } else if (!selectedAddressId) {
-      toast('Please select a delivery address', 'error');
-      return false;
-    }
-    return true;
-  }
-
-  async function handlePlaceOrder() {
-    if (!user) {
-      toast('Please sign in to place an order', 'error');
-      navigate('/login');
-      return;
-    }
-    if (!selectedMethod) {
-      toast('Please select a payment method', 'error');
-      return;
-    }
-    if (items.length === 0) {
-      toast('Your cart is empty', 'error');
-      return;
-    }
-
-    setPlacing(true);
-    try {
-      let addressData: {
-        full_name: string;
-        mobile: string;
-        line1: string;
-        line2?: string;
-        city: string;
-        state: string;
-        pincode: string;
-        label?: string;
-      };
-
-      if (useNew) {
-        addressData = { ...newAddress };
-      } else {
-        const addr = addresses.find((a) => a.id === selectedAddressId);
-        if (!addr) {
-          toast('Address not found', 'error');
-          setPlacing(false);
-          return;
-        }
-        addressData = {
-          full_name: addr.full_name,
-          mobile: addr.mobile,
-          line1: addr.line1,
-          line2: addr.line2 ?? '',
-          city: addr.city,
-          state: addr.state,
-          pincode: addr.pincode,
-          label: addr.label,
-        };
-      }
-
-      const result = await createOrder({
-        userId: user.id,
-        items: items.map((i) => ({
-          product_id: i.product_id,
-          variant_id: i.variant_id,
-          quantity: i.quantity,
-        })),
-        address: addressData,
-        couponCode: appliedCoupon?.code,
-        paymentMethodId: selectedMethod,
-      });
-
-      setOrderResult(result);
-      await refreshCart();
-      toast('Order placed successfully!');
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Failed to place order';
-      toast(msg, 'error');
-    } finally {
-      setPlacing(false);
-    }
-  }
-
-  async function handleSubmitPayment() {
-    if (!orderResult || !selectedMethod) return;
-    setPlacing(true);
-    try {
-      await submitOrderPayment(orderResult.order_id, selectedMethod, paymentRef);
-      setPaymentSubmitted(true);
-      setOrderResult((prev) => prev ? { ...prev, payment_status: 'Payment Submitted' } : null);
-      toast('Payment submitted for verification');
-    } catch (err) {
-      toast(err instanceof Error ? err.message : 'Failed to submit payment', 'error');
-    } finally {
-      setPlacing(false);
-    }
-  }
-
-  // ============================================
-  // SUCCESS ORDER CONFIRMATION SCREEN
-  // ============================================
-  if (orderResult) {
-    const selectedPm = paymentMethods.find((m) => m.id === selectedMethod);
-    const isManualUpi = selectedPm?.type === 'upi' || selectedPm?.type === 'upi_qr';
-
-    return (
-      <div className="container-silora py-8">
-        <div className="mx-auto max-w-xl">
-          <div className="rounded-3xl border border-ink-100 bg-white p-6 sm:p-8 shadow-card text-center">
-            <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-success-100 text-success-600 shadow-sm">
-              <Check className="h-8 w-8 stroke-[3]" />
-            </div>
-
-            <h1 className="text-2xl sm:text-3xl font-extrabold text-ink-900">Order placed successfully!</h1>
-            <p className="mt-2 text-sm text-ink-600">
-              Thank you for shopping with SILORA. Your order details are below:
-            </p>
-
-            {/* Key Order Meta Card */}
-            <div className="mt-6 rounded-2xl border border-ink-100 bg-ink-50 p-4 sm:p-5 text-left space-y-2.5 text-sm">
-              <div className="flex justify-between items-center">
-                <span className="text-ink-600">Order ID</span>
-                <span className="font-mono font-bold text-ink-900">{orderResult.order_number}<dyad-write path="src/pages/CheckoutPage.tsx" description="Completing CheckoutPage with proper order placement and confirmation view">
-import { useEffect, useState } from 'react';
-import { Link, navigate } from '@/components/router/Router';
-import { useCart } from '@/contexts/CartContext';
-import { useAuth } from '@/contexts/AuthContext';
-import { useToast } from '@/contexts/ToastContext';
-import {
-  fetchPaymentMethods,
-  fetchShippingConfig,
-  fetchUserAddresses,
-  validateCoupon,
-  createOrder,
-  submitOrderPayment,
-  type PlaceOrderResult,
-} from '@/services/api';
 import type { Address, PaymentMethod, ShippingConfig, Coupon } from '@/types';
 import { Button } from '@/components/ui/Button';
 import { Input, Select } from '@/components/ui/Input';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { Badge } from '@/components/ui/Badge';
 import { formatINR, classNames } from '@/utils/format';
-import { Check, ChevronRight, MapPin, CreditCard, ShoppingBag, Tag, Truck, Copy, QrCode, ArrowRight } from 'lucide-react';
+import { Check, ChevronRight, MapPin, CreditCard, ShoppingBag, Tag, Truck, Copy, QrCode, ShieldCheck, Clock, Info } from 'lucide-react';
 
 type Step = 1 | 2 | 3;
 
@@ -301,9 +68,11 @@ export function CheckoutPage() {
       if (a.length === 0) setUseNew(true);
     });
     fetchPaymentMethods().then((m) => {
-      setPaymentMethods(m);
-      if (m.length > 0) {
-        setSelectedMethod(m[0].id);
+      // Exclude COD methods completely
+      const onlineMethods = m.filter((method) => method.type !== 'cod');
+      setPaymentMethods(onlineMethods);
+      if (onlineMethods.length > 0) {
+        setSelectedMethod(onlineMethods[0].id);
       }
     });
     fetchShippingConfig().then(setShippingConfig);
@@ -431,7 +200,7 @@ export function CheckoutPage() {
       await submitOrderPayment(orderResult.order_id, selectedMethod, paymentRef);
       setPaymentSubmitted(true);
       setOrderResult((prev) => (prev ? { ...prev, payment_status: 'Payment Submitted' } : null));
-      toast('Payment submitted for verification');
+      toast('Payment reference submitted for verification');
     } catch (err) {
       toast(err instanceof Error ? err.message : 'Failed to submit payment', 'error');
     } finally {
@@ -444,7 +213,6 @@ export function CheckoutPage() {
   // ============================================
   if (orderResult) {
     const selectedPm = paymentMethods.find((m) => m.id === selectedMethod);
-    const isManualUpi = selectedPm?.type === 'upi' || selectedPm?.type === 'upi_qr';
 
     return (
       <div className="container-silora py-8">
@@ -484,7 +252,7 @@ export function CheckoutPage() {
                       : 'default'
                   }
                 >
-                  {orderResult.payment_status}
+                  {orderResult.payment_status === 'Payment Submitted' ? 'Payment Submitted — Awaiting Verification' : orderResult.payment_status}
                 </Badge>
               </div>
               <div className="flex justify-between items-center">
@@ -495,8 +263,19 @@ export function CheckoutPage() {
               </div>
             </div>
 
+            {/* Formal Payment Verification Notice */}
+            <div className="mt-6 rounded-2xl border border-accent-200 bg-accent-50/70 p-5 text-left">
+              <div className="flex items-center gap-2 text-accent-900 font-bold text-sm">
+                <Clock className="h-4 w-4 text-accent-700 shrink-0" />
+                Payment Verification Notice
+              </div>
+              <p className="mt-2 text-xs text-accent-900 leading-relaxed">
+                Thank you for your payment. Payments are manually verified by our team between 6:00 PM and 10:00 PM. Your order will be confirmed once the payment has been successfully verified. We appreciate your patience and understanding.
+              </p>
+            </div>
+
             {/* Manual UPI & QR Box */}
-            {isManualUpi && !paymentSubmitted && (
+            {!paymentSubmitted && (
               <div className="mt-6 rounded-2xl border border-primary-200 bg-primary-50/60 p-5 text-left">
                 <h3 className="flex items-center gap-2 text-base font-bold text-ink-900">
                   <QrCode className="h-5 w-5 text-primary-600" /> Pay with UPI
@@ -545,7 +324,7 @@ export function CheckoutPage() {
 
                 <div className="mt-3">
                   <Input
-                    placeholder="Enter UPI UTR / Transaction Reference (optional)"
+                    placeholder="Enter UPI UTR / Transaction Reference"
                     value={paymentRef}
                     onChange={(e) => setPaymentRef(e.target.value)}
                   />
@@ -555,7 +334,7 @@ export function CheckoutPage() {
                   I've Paid
                 </Button>
                 <p className="mt-2 text-center text-xs text-ink-500">
-                  Your payment will be verified by our team. You can also view details in your account.
+                  Clicking "I've Paid" will submit your transaction reference to our team for verification.
                 </p>
               </div>
             )}
@@ -564,16 +343,7 @@ export function CheckoutPage() {
               <div className="mt-6 rounded-2xl border border-warning-200 bg-warning-50 p-4 text-left">
                 <p className="text-sm font-semibold text-warning-800">Payment Submitted — Under Verification</p>
                 <p className="mt-1 text-xs text-warning-700">
-                  Our accounts team will verify your transaction reference and update your order status.
-                </p>
-              </div>
-            )}
-
-            {selectedPm?.type === 'cod' && (
-              <div className="mt-6 rounded-2xl border border-success-200 bg-success-50 p-4 text-left">
-                <p className="text-sm font-semibold text-success-800">Cash on Delivery</p>
-                <p className="mt-1 text-xs text-success-700">
-                  Please keep exact cash amount of {formatINR(orderResult.total)} ready upon delivery.
+                  Your reference has been submitted. Our team will verify it during our verification window (6:00 PM – 10:00 PM).
                 </p>
               </div>
             )}
@@ -625,6 +395,14 @@ export function CheckoutPage() {
   return (
     <div className="container-silora py-6">
       <h1 className="text-xl font-bold text-ink-900 sm:text-2xl mb-5">Checkout</h1>
+
+      {/* Short Verification Notice banner */}
+      <div className="mb-6 flex items-start gap-2.5 rounded-2xl border border-accent-200 bg-accent-50/80 p-3.5 text-xs text-accent-900 sm:text-sm">
+        <Info className="h-4 w-4 text-accent-700 shrink-0 mt-0.5" />
+        <p>
+          <strong>Notice:</strong> Payments are manually verified between 6:00 PM and 10:00 PM. Your order will be confirmed after successful verification. Thank you for your patience.
+        </p>
+      </div>
 
       {/* Stepper */}
       <div className="mb-6 flex items-center justify-center gap-2 sm:gap-4">
@@ -825,9 +603,9 @@ export function CheckoutPage() {
           {/* Step 3: Payment */}
           {step === 3 && (
             <div className="rounded-2xl border border-ink-100 bg-white p-5">
-              <h2 className="text-base font-bold text-ink-900 mb-4">Payment Method</h2>
+              <h2 className="text-base font-bold text-ink-900 mb-4">Online Payment Method</h2>
               {paymentMethods.length === 0 ? (
-                <p className="text-sm text-ink-500">No payment methods available. Please contact support.</p>
+                <p className="text-sm text-ink-500">No online payment methods configured. Please contact support.</p>
               ) : (
                 <div className="space-y-2">
                   {paymentMethods.map((pm) => (
@@ -850,13 +628,10 @@ export function CheckoutPage() {
                       <div className="flex-1">
                         <p className="text-sm font-semibold text-ink-900">{pm.name}</p>
                         {pm.description && <p className="text-xs text-ink-500 mt-0.5">{pm.description}</p>}
-                        {pm.type === 'upi' && pm.upi_id && (
+                        {pm.upi_id && (
                           <p className="mt-1 text-xs text-ink-600">
                             UPI ID: <code className="font-bold">{pm.upi_id}</code>
                           </p>
-                        )}
-                        {pm.type === 'cod' && (
-                          <p className="mt-1 text-xs text-ink-600">Pay in cash when your order is delivered.</p>
                         )}
                       </div>
                     </label>
@@ -864,42 +639,46 @@ export function CheckoutPage() {
                 </div>
               )}
 
+              {/* Payment Verification Notice */}
+              <div className="mt-4 rounded-xl border border-accent-200 bg-accent-50/80 p-4">
+                <p className="text-xs text-accent-900 leading-relaxed">
+                  <strong>Notice:</strong> Payments are manually verified between 6:00 PM and 10:00 PM. Your order will be confirmed after successful verification. Thank you for your patience.
+                </p>
+              </div>
+
               {(() => {
                 const pm = paymentMethods.find((m) => m.id === selectedMethod);
                 if (!pm) return null;
-                if (pm.type === 'upi' || pm.type === 'upi_qr') {
-                  return (
-                    <div className="mt-4 rounded-xl border border-primary-200 bg-primary-50 p-4">
-                      {pm.upi_id && (
-                        <div className="mb-2">
-                          <p className="text-xs font-medium text-ink-600">UPI ID</p>
-                          <div className="mt-1 flex items-center gap-2">
-                            <code className="flex-1 rounded-lg bg-white px-3 py-2 text-sm font-bold">{pm.upi_id}</code>
-                            <button
-                              onClick={() => {
-                                navigator.clipboard?.writeText(pm.upi_id!);
-                                toast('UPI ID copied');
-                              }}
-                              className="rounded-lg bg-primary-600 p-2 text-white"
-                            >
-                              <Copy className="h-4 w-4" />
-                            </button>
-                          </div>
+                return (
+                  <div className="mt-4 rounded-xl border border-primary-200 bg-primary-50 p-4">
+                    {pm.upi_id && (
+                      <div className="mb-2">
+                        <p className="text-xs font-medium text-ink-600">UPI ID</p>
+                        <div className="mt-1 flex items-center gap-2">
+                          <code className="flex-1 rounded-lg bg-white px-3 py-2 text-sm font-bold">{pm.upi_id}</code>
+                          <button
+                            onClick={() => {
+                              navigator.clipboard?.writeText(pm.upi_id!);
+                              toast('UPI ID copied');
+                            }}
+                            className="rounded-lg bg-primary-600 p-2 text-white"
+                          >
+                            <Copy className="h-4 w-4" />
+                          </button>
                         </div>
-                      )}
-                      {pm.payment_qr_codes?.filter((q) => q.enabled).map((qr) => (
-                        <div key={qr.id} className="mb-2">
-                          <img src={qr.image_url} alt={qr.name} className="mx-auto h-40 w-40 rounded-xl bg-white object-contain" />
-                        </div>
-                      ))}
-                      {pm.instructions && <p className="text-xs text-ink-600">{pm.instructions}</p>}
-                      <p className="mt-2 text-xs font-medium text-warning-700">
-                        Click "Place Order" below, then complete your payment. Manual UPI payments will be verified by our team.
-                      </p>
-                    </div>
-                  );
-                }
-                return null;
+                      </div>
+                    )}
+                    {pm.payment_qr_codes?.filter((q) => q.enabled).map((qr) => (
+                      <div key={qr.id} className="mb-2">
+                        <img src={qr.image_url} alt={qr.name} className="mx-auto h-40 w-40 rounded-xl bg-white object-contain" />
+                      </div>
+                    ))}
+                    {pm.instructions && <p className="text-xs text-ink-600">{pm.instructions}</p>}
+                    <p className="mt-2 text-xs font-medium text-warning-700">
+                      Click "Place Order" below to create your order, then complete your payment and submit your reference for verification.
+                    </p>
+                  </div>
+                );
               })()}
 
               <div className="mt-5 flex gap-3">

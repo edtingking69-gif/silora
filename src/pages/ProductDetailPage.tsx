@@ -244,7 +244,7 @@ export function ProductDetailPage({ id }: { id: string }) {
             {[
               { icon: Truck, title: 'Free Delivery', desc: 'On all orders' },
               { icon: RotateCcw, title: '7-Day Returns', desc: 'Easy return policy' },
-              { icon: ShieldCheck, title: 'Secure Payment', desc: 'UPI & COD available' },
+              { icon: ShieldCheck, title: 'Secure Payment', desc: 'Verified UPI & QR' },
             ].map((item) => (
               <div key={item.title} className="flex items-center gap-2.5 rounded-xl border border-ink-100 bg-white p-3">
                 <item.icon className="h-5 w-5 text-primary-600 shrink-0" />

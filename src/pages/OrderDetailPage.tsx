@@ -2,11 +2,10 @@ import { useEffect, useState } from 'react';
 import { Link, navigate } from '@/components/router/Router';
 import { useAuth } from '@/contexts/AuthContext';
 import { fetchOrderById, fetchPaymentsByOrder, fetchOrderStatusHistory } from '@/services/api';
-import type { Order, Payment, OrderStatusHistory, DeliveryStatus, PaymentStatus } from '@/types';
-import { Button } from '@/components/ui/Button';
+import type { Order, Payment, OrderStatusHistory, DeliveryStatus } from '@/types';
 import { EmptyState } from '@/components/ui/EmptyState';
-import { formatINR, formatDate, formatDateTime } from '@/utils/format';
-import { ArrowLeft, Package, MapPin, CreditCard, Check, Truck, Clock } from 'lucide-react';
+import { formatINR, formatDateTime } from '@/utils/format';
+import { ArrowLeft, Package, MapPin, CreditCard, Check, Truck, Clock, Info } from 'lucide-react';
 import { classNames } from '@/utils/format';
 
 const DELIVERY_STEPS: DeliveryStatus[] = ['Pending', 'Confirmed', 'Processing', 'Packed', 'Shipped', 'Out for Delivery', 'Delivered'];
@@ -44,6 +43,7 @@ export function OrderDetailPage({ id }: { id: string }) {
 
   const currentStepIdx = DELIVERY_STEPS.indexOf(order.delivery_status);
   const isCancelled = order.delivery_status === 'Cancelled' || order.delivery_status === 'Returned';
+  const isAwaitingVerification = order.payment_status === 'Payment Submitted' || order.payment_status === 'Under Verification' || order.payment_status === 'Pending';
 
   return (
     <div className="container-silora py-6">
@@ -62,7 +62,9 @@ export function OrderDetailPage({ id }: { id: string }) {
             order.payment_status === 'Paid' ? 'bg-success-100 text-success-700' :
             order.payment_status === 'Failed' || order.payment_status === 'Cancelled' ? 'bg-error-100 text-error-700' :
             'bg-warning-100 text-warning-700'
-          )}>{order.payment_status}</span>
+          )}>
+            {order.payment_status === 'Payment Submitted' ? 'Payment Submitted — Awaiting Verification' : order.payment_status}
+          </span>
           <span className={classNames(
             'inline-flex items-center rounded-full px-3 py-1 text-xs font-bold',
             order.delivery_status === 'Delivered' ? 'bg-success-100 text-success-700' :
@@ -70,6 +72,19 @@ export function OrderDetailPage({ id }: { id: string }) {
           )}>{order.delivery_status}</span>
         </div>
       </div>
+
+      {/* Payment Verification Notice */}
+      {isAwaitingVerification && order.payment_status !== 'Paid' && (
+        <div className="mb-6 rounded-2xl border border-accent-200 bg-accent-50/80 p-4 sm:p-5">
+          <div className="flex items-center gap-2 text-accent-900 font-bold text-sm">
+            <Info className="h-4 w-4 text-accent-700 shrink-0" />
+            Payment Verification Notice
+          </div>
+          <p className="mt-2 text-xs text-accent-900 leading-relaxed sm:text-sm">
+            Thank you for your payment. Payments are manually verified by our team between 6:00 PM and 10:00 PM. Your order will be confirmed once the payment has been successfully verified. We appreciate your patience and understanding.
+          </p>
+        </div>
+      )}
 
       <div className="grid gap-6 lg:grid-cols-3">
         <div className="lg:col-span-2 space-y-5">
@@ -159,10 +174,10 @@ export function OrderDetailPage({ id }: { id: string }) {
             <h2 className="flex items-center gap-2 text-base font-bold text-ink-900 mb-3">
               <CreditCard className="h-5 w-5 text-primary-600" /> Payment
             </h2>
-            <p className="text-sm text-ink-600">Method: <span className="font-semibold text-ink-900">{order.payment_method_name ?? 'N/A'}</span></p>
-            <p className="text-sm text-ink-600">Status: <span className="font-semibold">{order.payment_status}</span></p>
+            <p className="text-sm text-ink-600">Method: <span className="font-semibold text-ink-900">{order.payment_method_name ?? 'UPI / QR'}</span></p>
+            <p className="text-sm text-ink-600 mt-1">Status: <span className="font-semibold">{order.payment_status === 'Payment Submitted' ? 'Payment Submitted — Awaiting Verification' : order.payment_status}</span></p>
             {payments.length > 0 && payments[0].payment_reference && (
-              <p className="text-sm text-ink-600">Ref: <span className="font-mono text-xs">{payments[0].payment_reference}</span></p>
+              <p className="text-sm text-ink-600 mt-1">Reference / UTR: <span className="font-mono text-xs font-bold">{payments[0].payment_reference}</span></p>
             )}
           </div>
 
