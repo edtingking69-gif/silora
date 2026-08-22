@@ -54,7 +54,7 @@ function AppRoutes() {
   // Admin routes
   if (path === '/admin' || path.startsWith('/admin/')) {
     let content;
-    if (path === '/admin' || path === '/admin/dashboard') content = <AdminDashboard />;
+    if (path === '/admin' || path === '/admin/login' || path === '/admin/dashboard') content = <AdminDashboard />;
     else if (path === '/admin/products') content = <AdminProducts />;
     else if (path === '/admin/categories') content = <AdminCategories />;
     else if (path === '/admin/orders') content = <AdminOrders />;
