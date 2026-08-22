@@ -1,14 +1,14 @@
 /*
-# Update shipping configuration to free shipping on all orders
+-- Update shipping configuration to free shipping on all orders
 
-## Changes
+-- Changes
 - Updates `site_settings` row for key 'shipping' with new JSONB structure:
   {"enabled":true,"shipping_fee":0,"free_shipping_threshold":0,"message":"Free shipping on all orders"}
 - Updates the `create_order` RPC to read the new field names (`shipping_fee`, `free_shipping_threshold`, `enabled`)
   instead of the old names (`charge`, `free_threshold`, `free_enabled`).
 - With shipping_fee=0, all orders will have shipping=₹0 regardless of subtotal.
 
-## Important
+-- Important
 - No tables are created or dropped.
 - No data is lost — only the shipping config value is updated.
 - The create_order function is replaced to use the new field names.

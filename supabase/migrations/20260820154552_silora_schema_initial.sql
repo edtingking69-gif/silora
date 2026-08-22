@@ -1,10 +1,10 @@
 /*
-# SILORA E-Commerce Schema — Initial Setup
+-- SILORA E-Commerce Schema - Initial Setup
 
-## Overview
+-- Overview
 Creates the full database schema for SILORA, a multi-category Indian e-commerce platform with customer storefront and admin portal.
 
-## Tables Created
+-- Tables Created
 1. profiles — Customer profile data linked to auth.users
 2. user_roles — Role assignment (customer / admin). Users cannot self-assign admin.
 3. categories — Product categories
@@ -26,7 +26,7 @@ Creates the full database schema for SILORA, a multi-category Indian e-commerce 
 19. reviews — Customer product reviews
 20. storage bucket silora — public bucket for images
 
-## Security
+-- Security
 - RLS on every table. is_admin() SECURITY DEFINER helper checks user_roles.
 - Customers access only their own data. Public can read active products/categories.
 - Admin-only writes guarded by is_admin(). Users cannot self-assign admin role.

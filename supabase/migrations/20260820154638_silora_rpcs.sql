@@ -1,11 +1,11 @@
 /*
-# SILORA Order & Payment RPCs
+-- SILORA Order & Payment RPCs
 
-## Overview
+-- Overview
 Secure server-side functions for order creation and payment submission.
 Prices are recalculated from the database — the browser cannot supply prices.
 
-## Functions
+-- Functions
 1. create_order(p_items, p_address, p_coupon_code, p_payment_method_id)
    - Recalculates subtotal from live product prices
    - Applies coupon discount (validated server-side)
