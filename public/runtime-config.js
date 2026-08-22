@@ -1,0 +1,4 @@
+window.__SILORA_CONFIG__ = {
+  VITE_SUPABASE_URL: 'https://lfssldrluodqroxvsbuk.supabase.co',
+  VITE_SUPABASE_ANON_KEY: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imxmc3NsZHJsdW9kcXJveHZzYnVrIiwiaWF0IjoxNzg3MjM3NjIwLCJleHAiOjIxMDI4MTM2MjB9.xONgHEWH0TdwiwCggV_o49YUP14RCVrflpPuawdKCAg'
+};
