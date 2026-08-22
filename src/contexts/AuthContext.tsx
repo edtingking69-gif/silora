@@ -19,6 +19,15 @@ interface AuthContextValue {
 
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
 
+function formatSignInError(message: string | undefined): string | null {
+  if (!message) return null;
+  const normalized = message.toLowerCase();
+  if (normalized.includes('invalid login credentials') || normalized.includes('invalid email or password')) {
+    return 'Invalid email or password';
+  }
+  return message;
+}
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<Session | null>(null);
   const [profile, setProfile] = useState<Profile | null>(null);
@@ -82,7 +91,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     loading,
     async signIn(email, password) {
       const { error } = await supabase.auth.signInWithPassword({ email, password });
-      return { error: error?.message ?? null };
+      return { error: formatSignInError(error?.message) };
     },
     async signUp(email, password, fullName, mobile) {
       const { error } = await supabase.auth.signUp({
