@@ -12,15 +12,19 @@ export function SignupPage() {
   const [fullName, setFullName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
   const [mobile, setMobile] = useState('');
   const [loading, setLoading] = useState(false);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (!fullName || !email || !password) { toast('Please fill all required fields', 'error'); return; }
+    const normalizedMobile = mobile.replace(/\s+/g, '');
+    if (!fullName || !email || !password || !confirmPassword || !normalizedMobile) { toast('Please fill all required fields', 'error'); return; }
     if (password.length < 6) { toast('Password must be at least 6 characters', 'error'); return; }
+    if (password !== confirmPassword) { toast('Passwords do not match', 'error'); return; }
+    if (!/^[6-9]\d{9}$/.test(normalizedMobile)) { toast('Enter a valid 10-digit Indian mobile number', 'error'); return; }
     setLoading(true);
-    const { error } = await signUp(email, password, fullName);
+    const { error } = await signUp(email, password, fullName, normalizedMobile);
     setLoading(false);
     if (error) { toast(error, 'error'); return; }
     toast('Account created! Welcome to SILORA');
@@ -50,11 +54,15 @@ export function SignupPage() {
             </div>
             <div className="relative">
               <Phone className="absolute left-3 top-[42px] h-4 w-4 text-ink-400" />
-              <Input label="Mobile (optional)" value={mobile} onChange={(e) => setMobile(e.target.value)} placeholder="9876543210" className="pl-9" maxLength={10} />
+              <Input label="Mobile Number *" value={mobile} onChange={(e) => setMobile(e.target.value)} placeholder="9876543210" className="pl-9" maxLength={12} inputMode="numeric" autoComplete="tel" />
             </div>
             <div className="relative">
               <Lock className="absolute left-3 top-[42px] h-4 w-4 text-ink-400" />
               <Input label="Password *" type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Min 6 characters" className="pl-9" autoComplete="new-password" />
+            </div>
+            <div className="relative">
+              <Lock className="absolute left-3 top-[42px] h-4 w-4 text-ink-400" />
+              <Input label="Confirm Password *" type="password" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} placeholder="Repeat your password" className="pl-9" autoComplete="new-password" />
             </div>
             <Button type="submit" loading={loading} size="lg" className="w-full">
               Create Account <ArrowRight className="h-4 w-4" />

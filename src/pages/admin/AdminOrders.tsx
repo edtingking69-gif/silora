@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { supabase } from '@/lib/supabase';
+import { PAYMENT_PROOF_BUCKET, supabase } from '@/lib/supabase';
 import { fetchAdminOrders, fetchAdminOrderById, fetchOrderStatusHistory, fetchPaymentsByOrder } from '@/services/api';
 import type { Order, OrderStatusHistory, Payment, DeliveryStatus, PaymentStatus } from '@/types';
 import { Button } from '@/components/ui/Button';
@@ -11,8 +11,8 @@ import { useToast } from '@/contexts/ToastContext';
 import { formatINR, formatDate, formatDateTime } from '@/utils/format';
 import { ShoppingCart, Search, Phone, Mail, MapPin, Truck, Check, X, Clock } from 'lucide-react';
 
-const DELIVERY_STATUSES: DeliveryStatus[] = ['Pending', 'Confirmed', 'Processing', 'Packed', 'Shipped', 'Out for Delivery', 'Delivered', 'Cancelled', 'Returned'];
-const PAYMENT_STATUSES: PaymentStatus[] = ['Pending', 'Payment Submitted', 'Under Verification', 'Paid', 'Failed', 'Refunded', 'Cancelled'];
+const DELIVERY_STATUSES: DeliveryStatus[] = ['Pending', 'pending', 'Confirmed', 'Processing', 'Packed', 'Shipped', 'Out for Delivery', 'Delivered', 'Cancelled', 'Returned'];
+const PAYMENT_STATUSES: PaymentStatus[] = ['Pending', 'pending_verification', 'Payment Submitted', 'Under Verification', 'Paid', 'paid', 'rejected', 'Failed', 'Refunded', 'Cancelled'];
 
 export function AdminOrders() {
   const { toast } = useToast();
@@ -24,6 +24,8 @@ export function AdminOrders() {
   const [selected, setSelected] = useState<Order | null>(null);
   const [history, setHistory] = useState<OrderStatusHistory[]>([]);
   const [payments, setPayments] = useState<Payment[]>([]);
+  const [paymentProofUrl, setPaymentProofUrl] = useState('');
+  const [proofViewerOpen, setProofViewerOpen] = useState(false);
   const [newStatus, setNewStatus] = useState<DeliveryStatus>('Pending');
   const [courier, setCourier] = useState('');
   const [tracking, setTracking] = useState('');
@@ -45,9 +47,16 @@ export function AdminOrders() {
     setCourier(order.courier ?? '');
     setTracking(order.tracking_number ?? '');
     setNote('');
+    setPaymentProofUrl('');
+    setProofViewerOpen(false);
     const [hist, pays] = await Promise.all([fetchOrderStatusHistory(order.id), fetchPaymentsByOrder(order.id)]);
     setHistory(hist);
     setPayments(pays);
+    if (order.payment_proof_path) {
+      const { data, error } = await supabase.storage.from(PAYMENT_PROOF_BUCKET).createSignedUrl(order.payment_proof_path, 3600);
+      if (error) toast(error.message, 'error');
+      else setPaymentProofUrl(data.signedUrl);
+    }
   }
 
   async function handleUpdateStatus() {
@@ -86,23 +95,25 @@ export function AdminOrders() {
 
   async function handleUpdatePayment(paymentId: string, status: PaymentStatus) {
     try {
-      await supabase
+      const { error: paymentError } = await supabase
         .from('payments')
         .update({
           status,
-          verified_at: status === 'Paid' ? new Date().toISOString() : null,
+          verified_at: status.toLowerCase() === 'paid' ? new Date().toISOString() : null,
           updated_at: new Date().toISOString(),
         })
         .eq('id', paymentId);
+      if (paymentError) throw paymentError;
 
       if (selected) {
-        await supabase
+        const { error: orderError } = await supabase
           .from('orders')
           .update({
             payment_status: status,
             updated_at: new Date().toISOString(),
           })
           .eq('id', selected.id);
+        if (orderError) throw orderError;
       }
 
       await supabase.from('payment_status_history').insert({
@@ -117,6 +128,7 @@ export function AdminOrders() {
         const updated = await fetchAdminOrderById(selected.id);
         if (updated) await openOrder(updated);
       }
+      setProofViewerOpen(false);
       load();
     } catch (err) {
       toast(err instanceof Error ? err.message : 'Payment update failed', 'error');
@@ -182,7 +194,7 @@ export function AdminOrders() {
       ) : (
         <div className="space-y-2">
           {filtered.map((order) => {
-            const isAwaitingVerification = order.payment_status === 'Payment Submitted' || order.payment_status === 'Under Verification';
+            const isAwaitingVerification = order.payment_status === 'pending_verification' || order.payment_status === 'Payment Submitted' || order.payment_status === 'Under Verification';
             return (
               <button
                 key={order.id}
@@ -317,19 +329,36 @@ export function AdminOrders() {
                 <h3 className="text-sm font-bold text-ink-900">Payment Verification</h3>
                 <Badge
                   variant={
-                    selected.payment_status === 'Paid'
+                    selected.payment_status === 'Paid' || selected.payment_status === 'paid'
                       ? 'success'
-                      : selected.payment_status === 'Failed' || selected.payment_status === 'Cancelled'
+                      : selected.payment_status === 'Failed' || selected.payment_status === 'rejected' || selected.payment_status === 'Cancelled'
                       ? 'error'
                       : 'warning'
                   }
                 >
-                  {selected.payment_status === 'Payment Submitted'
+                  {selected.payment_status === 'Payment Submitted' || selected.payment_status === 'pending_verification'
                     ? 'Payment Submitted — Awaiting Verification'
                     : selected.payment_status}
                 </Badge>
               </div>
               <p className="text-xs text-ink-600">Method: {selected.payment_method_name ?? 'UPI / QR'}</p>
+              {selected.payment_method_name && selected.amount_paid !== null && (
+                <div className="mt-2 rounded-lg bg-primary-50 p-2 text-xs text-ink-700">
+                  <p><strong>Expected payment:</strong> {formatINR(selected.total)}</p>
+                  <p><strong>Customer entered:</strong> {formatINR(selected.amount_paid)}</p>
+                </div>
+              )}
+              {selected.payment_proof_path && (
+                <p className="mt-2 rounded-lg bg-warning-50 p-2 text-xs text-warning-800">
+                  <strong>Detected screenshot amount:</strong> Not available. Manual verification is required before marking this payment paid.
+                </p>
+              )}
+              {paymentProofUrl && (
+                <div className="mt-3">
+                  <p className="mb-2 text-xs font-semibold text-ink-700">Payment Screenshot</p>
+                  <Button size="sm" variant="outline" onClick={() => setProofViewerOpen(true)}>View Payment Screenshot</Button>
+                </div>
+              )}
               {payments.length > 0 && payments[0].payment_reference && (
                 <p className="mt-1 text-xs text-ink-700 font-medium">
                   Transaction Reference / UTR: <span className="font-mono font-bold">{payments[0].payment_reference}</span>
@@ -346,14 +375,14 @@ export function AdminOrders() {
 
               {payments.length > 0 && (
                 <div className="mt-3 flex gap-2 flex-wrap">
-                  {selected.payment_status !== 'Paid' && (
-                    <Button size="sm" variant="success" onClick={() => handleUpdatePayment(payments[0].id, 'Paid')}>
-                      <Check className="h-3.5 w-3.5 mr-1" /> Mark Paid
+                  {selected.payment_status !== 'Paid' && selected.payment_status !== 'paid' && (
+                    <Button size="sm" variant="success" onClick={() => handleUpdatePayment(payments[0].id, 'paid')}>
+                      <Check className="h-3.5 w-3.5 mr-1" /> Verify Payment
                     </Button>
                   )}
-                  {selected.payment_status !== 'Failed' && (
-                    <Button size="sm" variant="danger" onClick={() => handleUpdatePayment(payments[0].id, 'Failed')}>
-                      <X className="h-3.5 w-3.5 mr-1" /> Mark Failed
+                  {selected.payment_status !== 'rejected' && selected.payment_status !== 'Failed' && (
+                    <Button size="sm" variant="danger" onClick={() => handleUpdatePayment(payments[0].id, 'rejected')}>
+                      <X className="h-3.5 w-3.5 mr-1" /> Reject Payment
                     </Button>
                   )}
                   {selected.payment_status !== 'Under Verification' && selected.payment_status !== 'Paid' && (
@@ -393,6 +422,42 @@ export function AdminOrders() {
                 </div>
               )}
             </div>
+          </div>
+        )}
+      </Modal>
+
+      <Modal
+        open={proofViewerOpen && !!selected && !!paymentProofUrl}
+        onClose={() => setProofViewerOpen(false)}
+        title={selected ? `Payment Proof — Order #${selected.order_number}` : 'Payment Proof'}
+        className="max-w-4xl"
+      >
+        {selected && paymentProofUrl && (
+          <div className="space-y-4">
+            <div className="grid gap-2 rounded-xl bg-ink-50 p-4 text-sm sm:grid-cols-2">
+              <p><strong>Order ID:</strong> {selected.order_number}</p>
+              <p><strong>Payment method:</strong> {selected.payment_method_name ?? 'UPI / QR'}</p>
+              <p><strong>Expected amount:</strong> {formatINR(selected.total)}</p>
+              <p><strong>Customer entered:</strong> {selected.amount_paid === null ? 'Not supplied' : formatINR(selected.amount_paid)}</p>
+              <p><strong>Payment status:</strong> {selected.payment_status}</p>
+            </div>
+            <div className="overflow-auto rounded-xl border border-ink-200 bg-ink-950 p-3">
+              <img src={paymentProofUrl} alt={`Payment proof for order ${selected.order_number}`} className="mx-auto max-h-[65vh] w-full object-contain" />
+            </div>
+            {payments.length > 0 && (
+              <div className="flex flex-wrap gap-2">
+                {selected.payment_status !== 'Paid' && selected.payment_status !== 'paid' && (
+                  <Button size="sm" variant="success" onClick={() => handleUpdatePayment(payments[0].id, 'paid')}>
+                    <Check className="mr-1 h-3.5 w-3.5" /> Verify Payment
+                  </Button>
+                )}
+                {selected.payment_status !== 'rejected' && selected.payment_status !== 'Failed' && (
+                  <Button size="sm" variant="danger" onClick={() => handleUpdatePayment(payments[0].id, 'rejected')}>
+                    <X className="mr-1 h-3.5 w-3.5" /> Reject Payment
+                  </Button>
+                )}
+              </div>
+            )}
           </div>
         )}
       </Modal>

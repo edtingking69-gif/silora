@@ -102,15 +102,20 @@ export interface Address {
 
 export type PaymentStatus =
   | 'Pending'
+  | 'pending'
+  | 'pending_verification'
   | 'Payment Submitted'
   | 'Under Verification'
   | 'Paid'
+  | 'paid'
+  | 'rejected'
   | 'Failed'
   | 'Refunded'
   | 'Cancelled';
 
 export type DeliveryStatus =
   | 'Pending'
+  | 'pending'
   | 'Confirmed'
   | 'Processing'
   | 'Packed'
@@ -136,11 +141,13 @@ export interface Order {
   discount: number;
   shipping: number;
   total: number;
+  amount_paid: number | null;
   coupon_code: string | null;
   payment_method_id: string | null;
   payment_method_name: string | null;
   payment_status: PaymentStatus;
   delivery_status: DeliveryStatus;
+  payment_proof_path: string | null;
   tracking_number: string | null;
   courier: string | null;
   delivery_notes: string | null;

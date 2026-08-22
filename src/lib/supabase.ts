@@ -16,3 +16,4 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
 });
 
 export const STORAGE_BUCKET = 'silora';
+export const PAYMENT_PROOF_BUCKET = 'payment-proofs';

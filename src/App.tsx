@@ -16,6 +16,7 @@ import { LoginPage } from '@/pages/LoginPage';
 import { SignupPage } from '@/pages/SignupPage';
 import { AccountPage } from '@/pages/AccountPage';
 import { OrderDetailPage } from '@/pages/OrderDetailPage';
+import { InfoPage } from '@/pages/InfoPage';
 
 import { AdminDashboard } from '@/pages/admin/AdminDashboard';
 import { AdminProducts } from '@/pages/admin/AdminProducts';
@@ -76,6 +77,10 @@ function AppRoutes() {
   else if (path === '/categories') content = <CategoriesPage />;
   else if (path === '/cart') content = <CartPage />;
   else if (path === '/checkout') content = <CheckoutPage />;
+  else if (path === '/about') content = <InfoPage kind="about" />;
+  else if (path === '/contact') content = <InfoPage kind="contact" />;
+  else if (path === '/privacy') content = <InfoPage kind="privacy" />;
+  else if (path === '/terms') content = <InfoPage kind="terms" />;
   else if (path === '/account') content = <AccountPage />;
   else if (path === '/account/orders') content = <AccountPage />;
   else {

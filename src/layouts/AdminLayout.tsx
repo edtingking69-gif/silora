@@ -65,7 +65,7 @@ export function AdminLayout({ children }: { children: ReactNode }) {
           <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-2xl bg-error-50 text-error-500">
             <ShieldCheck className="h-8 w-8" />
           </div>
-          <h1 className="text-xl font-bold text-ink-900">Access Denied</h1>
+          <h1 className="text-xl font-bold text-ink-900">Access Denied — Administrator access required.</h1>
           <p className="mt-2 text-sm text-ink-500">You don't have admin privileges. This area is restricted to authorized administrators only.</p>
           <div className="mt-6 flex gap-3 justify-center">
             <Link to="/" className="rounded-xl border border-ink-300 bg-white px-5 py-2.5 text-sm font-semibold text-ink-700 hover:bg-ink-50">Go to Store</Link>

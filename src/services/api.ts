@@ -1,7 +1,7 @@
-import { supabase } from '@/lib/supabase';
+import { PAYMENT_PROOF_BUCKET, supabase } from '@/lib/supabase';
 import type {
   Product, Category, PaymentMethod, Coupon, ShippingConfig, StoreConfig,
-  Order, OrderItem, Payment, Address, Profile, Review,
+  Order, Payment, Address, Profile, Review,
   OrderStatusHistory, PaymentStatusHistory, DeliveryStatus, PaymentStatus,
 } from '@/types';
 
@@ -223,6 +223,8 @@ export interface PlaceOrderInput {
   };
   couponCode?: string | null;
   paymentMethodId: string;
+  paymentProofFile?: File | null;
+  paymentAmount?: string;
 }
 
 export interface PlaceOrderResult {
@@ -234,10 +236,64 @@ export interface PlaceOrderResult {
   delivery_status: DeliveryStatus;
 }
 
+export async function uploadPaymentProof(file: File, userId: string, orderId: string): Promise<string> {
+  const { data, error: authError } = await supabase.auth.getUser();
+  if (authError) {
+    if (import.meta.env.DEV) console.error('Payment proof authentication check failed:', authError);
+    throw new Error('Please sign in before uploading your payment screenshot.');
+  }
+  if (!data.user) {
+    throw new Error('Please sign in before uploading your payment screenshot.');
+  }
+  if (data.user.id !== userId) {
+    throw new Error('Your session expired. Please sign in again before uploading payment proof.');
+  }
+
+  const acceptedTypes = ['image/png', 'image/jpeg', 'image/webp'];
+  if (!acceptedTypes.includes(file.type)) {
+    throw new Error('Payment screenshot must be PNG, JPG, JPEG, or WEBP and smaller than 5 MB.');
+  }
+  if (file.size > 5 * 1024 * 1024) {
+    throw new Error('Payment screenshot must be PNG, JPG, JPEG, or WEBP and smaller than 5 MB.');
+  }
+
+  const extensionByType: Record<string, string> = {
+    'image/png': 'png',
+    'image/jpeg': 'jpg',
+    'image/webp': 'webp',
+  };
+  const fileName = `payment-${crypto.randomUUID()}.${extensionByType[file.type]}`;
+  const path = `${userId}/${orderId}/${fileName}`;
+  const { error } = await supabase.storage
+    .from(PAYMENT_PROOF_BUCKET)
+    .upload(path, file, { contentType: file.type, upsert: false });
+
+  if (error) {
+    if (import.meta.env.DEV) {
+      const storageStatus = (error as typeof error & { status?: number }).status;
+      console.error('Payment proof upload failed:', {
+        error,
+        message: error.message,
+        name: error.name,
+        status: storageStatus,
+        statusCode: (error as typeof error & { statusCode?: string | number }).statusCode,
+        bucket: PAYMENT_PROOF_BUCKET,
+        path,
+      });
+    }
+    throw new Error("We couldn't upload your payment screenshot. Please try again.");
+  }
+  return path;
+}
+
 export async function createOrder(input: PlaceOrderInput): Promise<PlaceOrderResult> {
   const { userId, items, address, couponCode, paymentMethodId } = input;
 
   if (!userId) throw new Error('User must be authenticated to place an order.');
+  const { data: authData, error: authError } = await supabase.auth.getUser();
+  if (authError || !authData.user || authData.user.id !== userId) {
+    throw new Error('Your session expired. Please sign in again before placing the order.');
+  }
   if (!items || items.length === 0) throw new Error('Cart is empty.');
   if (!address.full_name || !address.mobile || !address.line1 || !address.city || !address.state || !address.pincode) {
     throw new Error('Please provide complete delivery address details.');
@@ -254,6 +310,11 @@ export async function createOrder(input: PlaceOrderInput): Promise<PlaceOrderRes
     throw new Error('Selected payment method is invalid or unavailable.');
   }
   const paymentMethod = pmData as PaymentMethod;
+  const requiresPaymentProof = paymentMethod.type === 'upi_qr';
+  if (requiresPaymentProof && !input.paymentProofFile) {
+    throw new Error('Please upload your payment screenshot before placing the order.');
+  }
+  const submittedAmountPaise = input.paymentAmount ? Math.round(Number(input.paymentAmount) * 100) : null;
 
   // 2. Fetch authenticated user profile / email
   const { data: userProfile } = await supabase
@@ -349,137 +410,51 @@ export async function createOrder(input: PlaceOrderInput): Promise<PlaceOrderRes
 
   // 4. Calculate coupon discount
   let calculatedDiscount = 0;
-  let validatedCouponCode: string | null = null;
   if (couponCode && couponCode.trim()) {
     const couponValidation = await validateCoupon(couponCode, calculatedSubtotal);
     if (couponValidation.coupon && !couponValidation.error) {
       calculatedDiscount = couponValidation.discount;
-      validatedCouponCode = couponValidation.coupon.code;
     }
   }
 
-  // 5. Calculate shipping
-  const shippingConfig = await fetchShippingConfig();
-  const freeThreshold = shippingConfig.free_shipping_threshold ?? 0;
-  const isFree = shippingConfig.enabled && (freeThreshold === 0 || calculatedSubtotal >= freeThreshold);
-  const calculatedShipping = isFree ? 0 : (shippingConfig.shipping_fee ?? 0);
+  // Shipping is free for every order.
+  const calculatedShipping = 0;
 
   const calculatedTotal = Math.max(0, Math.round((calculatedSubtotal - calculatedDiscount + calculatedShipping) * 100) / 100);
-
-  // Generate unique order number
-  const orderNumber = 'SL' + Date.now().toString(36).toUpperCase() + Math.random().toString(36).substring(2, 6).toUpperCase();
-
-  const initialPaymentStatus: PaymentStatus = 'Pending';
-  const initialDeliveryStatus: DeliveryStatus = 'Pending';
-
-  // 6. Insert order record
-  const { data: newOrder, error: orderInsertError } = await supabase
-    .from('orders')
-    .insert({
-      order_number: orderNumber,
-      user_id: userId,
-      customer_name: address.full_name,
-      email: userEmail,
-      mobile: address.mobile,
-      address_line1: address.line1,
-      address_line2: address.line2 || null,
-      city: address.city,
-      state: address.state,
-      pincode: address.pincode,
-      subtotal: calculatedSubtotal,
-      discount: calculatedDiscount,
-      shipping: calculatedShipping,
-      total: calculatedTotal,
-      coupon_code: validatedCouponCode,
-      payment_method_id: paymentMethod.id,
-      payment_method_name: paymentMethod.name,
-      payment_status: initialPaymentStatus,
-      delivery_status: initialDeliveryStatus,
-    })
-    .select('*')
-    .single();
-
-  if (orderInsertError || !newOrder) {
-    throw new Error(orderInsertError?.message || 'Failed to create order record.');
+  if (requiresPaymentProof && (submittedAmountPaise === null || !Number.isFinite(submittedAmountPaise) || submittedAmountPaise !== Math.round(calculatedTotal * 100))) {
+    throw new Error('Payment amount does not match the order total. Please pay the exact amount shown and upload the correct payment screenshot.');
   }
 
-  const orderId = newOrder.id;
+  // Reserve the order ID before uploading so the proof path is scoped to this order.
+  const orderId = crypto.randomUUID();
+  let paymentProofPath: string | null = null;
 
-  // 7. Insert order items
-  const itemsToInsert = verifiedOrderItems.map((item) => ({
-    order_id: orderId,
-    product_id: item.product_id,
-    product_name: item.product_name,
-    product_image: item.product_image,
-    variant_name: item.variant_name,
-    price: item.price,
-    original_price: item.original_price,
-    quantity: item.quantity,
-  }));
-
-  const { error: itemsError } = await supabase
-    .from('order_items')
-    .insert(itemsToInsert);
-
-  if (itemsError) {
-    await supabase.from('orders').delete().eq('id', orderId);
-    throw new Error('Failed to create order items: ' + itemsError.message);
+  if (input.paymentProofFile) {
+    paymentProofPath = await uploadPaymentProof(input.paymentProofFile, userId, orderId);
   }
 
-  // 8. Create initial payment entry
-  await supabase
-    .from('payments')
-    .insert({
-      order_id: orderId,
-      user_id: userId,
-      payment_method_id: paymentMethod.id,
-      payment_method_name: paymentMethod.name,
-      amount: calculatedTotal,
-      status: initialPaymentStatus,
-    });
-
-  // 9. Update stock & coupon usage
-  for (const item of items) {
-    const prod = dbProducts.find((p) => p.id === item.product_id);
-    if (prod) {
-      await supabase.from('products').update({
-        stock: Math.max(0, prod.stock - item.quantity),
-        sales_count: (prod.sales_count || 0) + item.quantity,
-      }).eq('id', prod.id);
-    }
-    if (item.variant_id) {
-      const v = dbVariants.find((vr) => vr.id === item.variant_id);
-      if (v) {
-        await supabase.from('product_variants').update({
-          stock: Math.max(0, v.stock - item.quantity),
-        }).eq('id', v.id);
-      }
-    }
+  const { data: rpcData, error: rpcError } = await supabase.rpc('create_order_with_proof', {
+    p_items: items.map((item) => ({ product_id: item.product_id, variant_id: item.variant_id, quantity: item.quantity })),
+    p_address: address,
+    p_coupon_code: couponCode || null,
+    p_payment_method_id: paymentMethodId,
+    p_payment_proof_path: paymentProofPath,
+    p_payment_amount: requiresPaymentProof ? Number(input.paymentAmount) : null,
+    p_order_id: orderId,
+  });
+  if (rpcError || !rpcData) {
+    if (paymentProofPath) await supabase.storage.from(PAYMENT_PROOF_BUCKET).remove([paymentProofPath]);
+    throw new Error(rpcError?.message || 'We could not place your order. Please try again.');
   }
-
-  if (validatedCouponCode) {
-    const { data: coup } = await supabase
-      .from('coupons')
-      .select('id, usage_count')
-      .eq('code', validatedCouponCode)
-      .maybeSingle();
-    if (coup) {
-      await supabase.from('coupons').update({
-        usage_count: (coup.usage_count || 0) + 1,
-      }).eq('id', coup.id);
-    }
-  }
-
-  // 10. Clear user's cart in database
-  await supabase.from('cart_items').delete().eq('user_id', userId);
+  const serverOrder = rpcData as PlaceOrderResult;
 
   return {
-    order_id: orderId,
-    order_number: orderNumber,
-    total: calculatedTotal,
-    payment_method_name: paymentMethod.name,
-    payment_status: initialPaymentStatus,
-    delivery_status: initialDeliveryStatus,
+    order_id: serverOrder.order_id,
+    order_number: serverOrder.order_number,
+    total: Number(serverOrder.total),
+    payment_method_name: serverOrder.payment_method_name,
+    payment_status: serverOrder.payment_status,
+    delivery_status: serverOrder.delivery_status,
   };
 }
 

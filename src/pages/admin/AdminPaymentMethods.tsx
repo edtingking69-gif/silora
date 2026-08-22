@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { supabase } from '@/lib/supabase';
+import { supabase, STORAGE_BUCKET } from '@/lib/supabase';
 import { fetchAdminPaymentMethods } from '@/services/api';
 import type { PaymentMethod, PaymentMethodType } from '@/types';
 import { Button } from '@/components/ui/Button';
@@ -8,9 +8,10 @@ import { Modal, ConfirmDialog } from '@/components/ui/Modal';
 import { Badge } from '@/components/ui/Badge';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { useToast } from '@/contexts/ToastContext';
-import { Plus, Pencil, Trash2, CreditCard, QrCode as QrIcon } from 'lucide-react';
+import { Plus, Pencil, Trash2, CreditCard, QrCode as QrIcon, Upload, X } from 'lucide-react';
 
 const TYPES: PaymentMethodType[] = ['upi', 'upi_qr', 'gateway', 'other'];
+const TYPE_LABELS: Record<PaymentMethodType, string> = { upi: 'UPI', upi_qr: 'QR Payment', cod: 'Cash on Delivery', gateway: 'Payment Gateway', other: 'Other' };
 
 export function AdminPaymentMethods() {
   const { toast } = useToast();
@@ -20,6 +21,8 @@ export function AdminPaymentMethods() {
   const [editing, setEditing] = useState<PaymentMethod | null>(null);
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [qrFile, setQrFile] = useState<File | null>(null);
+  const [qrPreviewUrl, setQrPreviewUrl] = useState('');
   const [form, setForm] = useState({ name: '', type: 'upi' as PaymentMethodType, description: '', instructions: '', upi_id: '', enabled: true, display_order: '0' });
 
   async function load() {
@@ -32,35 +35,89 @@ export function AdminPaymentMethods() {
 
   function openAdd() {
     setEditing(null);
+    setQrFile(null);
+    setQrPreviewUrl('');
     setForm({ name: '', type: 'upi', description: '', instructions: '', upi_id: '', enabled: true, display_order: '0' });
     setShowModal(true);
   }
 
   function openEdit(m: PaymentMethod) {
     setEditing(m);
+    setQrFile(null);
+    setQrPreviewUrl(m.payment_qr_codes?.[0]?.image_url ?? '');
     setForm({ name: m.name, type: m.type === 'cod' ? 'upi' : m.type, description: m.description ?? '', instructions: m.instructions ?? '', upi_id: m.upi_id ?? '', enabled: m.enabled, display_order: String(m.display_order) });
     setShowModal(true);
   }
 
+  function handleQrFile(file: File | undefined) {
+    if (!file) return;
+    if (!['image/png', 'image/jpeg', 'image/webp'].includes(file.type)) {
+      toast('QR image must be PNG, JPG, JPEG, or WEBP.', 'error');
+      return;
+    }
+    setQrFile(file);
+    setQrPreviewUrl(URL.createObjectURL(file));
+  }
+
+  function clearQrImage() {
+    setQrFile(null);
+    setQrPreviewUrl('');
+  }
+
   async function handleSave() {
     if (!form.name) { toast('Name is required', 'error'); return; }
+    if (form.type === 'upi_qr' && !qrPreviewUrl) {
+      toast('QR Code Image is required for QR Payment.', 'error');
+      return;
+    }
     setSaving(true);
     try {
+      let qrImageUrl = qrPreviewUrl;
+      if (qrFile) {
+        const extension = qrFile.name.split('.').pop()?.toLowerCase() ?? 'png';
+        const path = `payment-qr/${Date.now()}-${Math.random().toString(36).slice(2)}.${extension}`;
+        const { error: uploadError } = await supabase.storage.from(STORAGE_BUCKET).upload(path, qrFile, {
+          cacheControl: '3600',
+          contentType: qrFile.type,
+          upsert: false,
+        });
+        if (uploadError) throw uploadError;
+        qrImageUrl = supabase.storage.from(STORAGE_BUCKET).getPublicUrl(path).data.publicUrl;
+      }
       const data = {
         name: form.name, type: form.type, description: form.description || null,
         instructions: form.instructions || null, upi_id: form.upi_id || null,
         enabled: form.enabled, display_order: Number(form.display_order) || 0,
       };
+      let methodId = editing?.id;
       if (editing) {
         const { error } = await supabase.from('payment_methods').update(data).eq('id', editing.id);
         if (error) throw error;
       } else {
-        const { error } = await supabase.from('payment_methods').insert(data);
+        const { data: createdMethod, error } = await supabase.from('payment_methods').insert(data).select('id').single();
         if (error) throw error;
+        methodId = createdMethod.id;
+      }
+      if (form.type === 'upi_qr' && methodId && qrImageUrl) {
+        const qr = editing?.payment_qr_codes?.[0];
+        const qrData = {
+          payment_method_id: methodId,
+          name: form.name,
+          description: form.description || null,
+          image_url: qrImageUrl,
+          enabled: form.enabled,
+          display_order: 0,
+        };
+        const { error: qrError } = qr
+          ? await supabase.from('payment_qr_codes').update(qrData).eq('id', qr.id)
+          : await supabase.from('payment_qr_codes').insert(qrData);
+        if (qrError) throw qrError;
       }
       await supabase.rpc('log_admin_action', { p_action: 'Payment Method Changed', p_target: 'payment_method', p_target_id: editing?.id ?? null });
       toast(editing ? 'Updated' : 'Added');
       setShowModal(false);
+      setQrFile(null);
+      setQrPreviewUrl('');
       load();
     } catch (err) {
       toast(err instanceof Error ? err.message : 'Save failed', 'error');
@@ -120,9 +177,28 @@ export function AdminPaymentMethods() {
         <div className="space-y-4">
           <Input label="Name *" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="e.g. UPI QR Payment" />
           <Select label="Type" value={form.type} onChange={(e) => setForm({ ...form, type: e.target.value as PaymentMethodType })}>
-            {TYPES.map((t) => <option key={t} value={t}>{t.toUpperCase()}</option>)}
+            {TYPES.map((t) => <option key={t} value={t}>{TYPE_LABELS[t]}</option>)}
           </Select>
-          <Input label="UPI ID" value={form.upi_id} onChange={(e) => setForm({ ...form, upi_id: e.target.value })} placeholder="example@upi" />
+          {form.type === 'upi_qr' && (
+            <div>
+              <label className="text-sm font-semibold text-ink-800">QR Code Image *</label>
+              <div className="mt-1.5 flex items-center gap-3">
+                {qrPreviewUrl && (
+                  <div className="relative h-28 w-28 overflow-hidden rounded-xl border border-ink-200 bg-white p-1">
+                    <img src={qrPreviewUrl} alt="QR code preview" className="h-full w-full object-contain" />
+                    <button type="button" onClick={clearQrImage} className="absolute right-1 top-1 rounded-full bg-error-600 p-1 text-white" aria-label="Remove QR image"><X className="h-3 w-3" /></button>
+                  </div>
+                )}
+                <label className="flex h-28 w-36 cursor-pointer flex-col items-center justify-center gap-1 rounded-xl border-2 border-dashed border-ink-300 text-ink-500 hover:border-primary-400 hover:text-primary-600">
+                  <Upload className="h-5 w-5" />
+                  <span className="text-xs font-semibold">Upload QR Code</span>
+                  <input type="file" accept="image/png,image/jpeg,image/webp" className="hidden" onChange={(event) => handleQrFile(event.target.files?.[0])} />
+                </label>
+              </div>
+              <p className="mt-1 text-xs text-ink-500">PNG, JPG, JPEG, or WEBP</p>
+            </div>
+          )}
+          {form.type === 'upi_qr' && <Input label="UPI ID (optional)" value={form.upi_id} onChange={(e) => setForm({ ...form, upi_id: e.target.value })} placeholder="example@upi" />}
           <Textarea label="Description" rows={2} value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} />
           <Textarea label="Instructions" rows={3} value={form.instructions} onChange={(e) => setForm({ ...form, instructions: e.target.value })} placeholder="Payment instructions for customer" />
           <Input label="Display Order" type="number" value={form.display_order} onChange={(e) => setForm({ ...form, display_order: e.target.value })} />
