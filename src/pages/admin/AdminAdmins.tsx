@@ -18,35 +18,10 @@ interface AdminUser {
   is_active: boolean;
 }
 
-interface RoleRow {
-  user_id: string;
-  created_at: string;
-}
-
-interface ProfileRow {
+interface AdminLookupRow {
   id: string;
   email: string;
   full_name: string | null;
-  created_at: string;
-  is_active: boolean;
-}
-
-async function describeAdminCreationError(error: unknown): Promise<string> {
-  if (!(error instanceof Error)) return 'Admin creation failed: Unknown function invocation error';
-
-  const context = (error as Error & { context?: unknown }).context;
-  if (context instanceof Response) {
-    let serverMessage = '';
-    try {
-      const body = await context.json() as { error?: string; message?: string };
-      serverMessage = body.error || body.message || '';
-    } catch {
-      serverMessage = '';
-    }
-    return `Admin creation failed: HTTP ${context.status}${serverMessage ? ` - ${serverMessage}` : ''}`;
-  }
-
-  return `Admin creation failed: ${error.name}: ${error.message}`;
 }
 
 export function AdminAdmins() {
@@ -56,54 +31,18 @@ export function AdminAdmins() {
   const [loading, setLoading] = useState(true);
   const [showAdd, setShowAdd] = useState(false);
   const [email, setEmail] = useState('');
-  const [name, setName] = useState('');
-  const [password, setPassword] = useState('');
-  const [confirmPassword, setConfirmPassword] = useState('');
   const [saving, setSaving] = useState(false);
   const [removeId, setRemoveId] = useState<string | null>(null);
 
   async function load() {
     setLoading(true);
-    const { data: roles, error: rolesError } = await supabase
-      .from('user_roles')
-      .select('user_id, created_at')
-      .eq('role', 'admin')
-      .order('created_at', { ascending: true });
-    if (rolesError) {
-      toast(rolesError.message, 'error');
+    const { data, error } = await supabase.rpc('list_admin_profiles');
+    if (error) {
+      toast(error.message, 'error');
       setLoading(false);
       return;
     }
-
-    const roleRows = (roles ?? []) as RoleRow[];
-    const ids = roleRows.map((role) => role.user_id);
-    if (ids.length === 0) {
-      setAdmins([]);
-      setLoading(false);
-      return;
-    }
-
-    const { data: profiles, error: profilesError } = await supabase
-      .from('profiles')
-      .select('id, email, full_name, created_at, is_active')
-      .in('id', ids);
-    if (profilesError) {
-      toast(profilesError.message, 'error');
-      setLoading(false);
-      return;
-    }
-
-    const profileRows = (profiles ?? []) as ProfileRow[];
-    setAdmins(roleRows.map((role) => {
-      const profile = profileRows.find((candidate) => candidate.id === role.user_id);
-      return {
-        user_id: role.user_id,
-        email: profile?.email ?? 'Email unavailable',
-        full_name: profile?.full_name ?? null,
-        created_at: role.created_at,
-        is_active: profile?.is_active ?? false,
-      };
-    }));
+    setAdmins((data ?? []) as AdminUser[]);
     setLoading(false);
   }
 
@@ -112,36 +51,12 @@ export function AdminAdmins() {
   function closeAdd() {
     setShowAdd(false);
     setEmail('');
-    setName('');
-    setPassword('');
-    setConfirmPassword('');
   }
 
   async function handleAdd() {
-    const normalizedName = name.trim();
     const normalizedEmail = email.trim().toLowerCase();
-    if (!normalizedName) {
-      toast('Name is required', 'error');
-      return;
-    }
     if (!normalizedEmail) {
       toast('Email is required', 'error');
-      return;
-    }
-    if (!password) {
-      toast('Password is required.', 'error');
-      return;
-    }
-    if (!confirmPassword) {
-      toast('Confirm Password is required.', 'error');
-      return;
-    }
-    if (password.length < 8) {
-      toast('Password must be at least 8 characters.', 'error');
-      return;
-    }
-    if (password !== confirmPassword) {
-      toast('Passwords do not match.', 'error');
       return;
     }
     setSaving(true);
@@ -151,17 +66,18 @@ export function AdminAdmins() {
         toast('Please sign in as an administrator.', 'error');
         return;
       }
-      const { data, error } = await supabase.functions.invoke('create-admin', {
-        body: { name: normalizedName, email: normalizedEmail, password },
-      });
+      const { data: matches, error } = await supabase.rpc('find_user_by_email', { target_email: normalizedEmail });
       if (error) {
-        throw new Error(await describeAdminCreationError(error));
+        throw error;
       }
-      if (data?.already_admin) {
-        toast('This user is already an administrator.', 'error');
+      const target = (matches as AdminLookupRow[] | null)?.[0];
+      if (!target) {
+        toast('No existing Supabase user was found for this email. Ask them to sign up first.', 'error');
         return;
       }
-      toast(data?.created ? 'Administrator created successfully' : 'Administrator access granted');
+      const { error: roleError } = await supabase.rpc('set_admin_role', { target_user_id: target.id });
+      if (roleError) throw roleError;
+      toast('Administrator access granted');
       await supabase.rpc('log_admin_action', { p_action: 'Admin Added', p_target: 'user', p_details: { email: normalizedEmail } });
       closeAdd();
       await load();
@@ -233,11 +149,8 @@ export function AdminAdmins() {
 
       <Modal open={showAdd} onClose={closeAdd} title="Add Admin">
         <div className="space-y-4">
-          <p className="rounded-xl bg-ink-50 p-3 text-xs leading-5 text-ink-600">Existing Supabase users are promoted securely. New users receive a Supabase Auth account with the password entered here.</p>
-          <Input label="Name *" value={name} onChange={(event) => setName(event.target.value)} autoComplete="name" />
+          <p className="rounded-xl bg-ink-50 p-3 text-xs leading-5 text-ink-600">Enter the email of an existing Supabase user. They must sign up first; administrator access is then granted securely by the database.</p>
           <Input label="Email *" type="email" value={email} onChange={(event) => setEmail(event.target.value)} autoComplete="email" />
-          <Input label="Password *" type="password" value={password} onChange={(event) => setPassword(event.target.value)} autoComplete="new-password" minLength={8} />
-          <Input label="Confirm Password *" type="password" value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} autoComplete="new-password" minLength={8} />
           <div className="flex gap-3 pt-2"><Button variant="outline" onClick={closeAdd} className="flex-1">Cancel</Button><Button onClick={handleAdd} loading={saving} className="flex-1">Add Admin</Button></div>
         </div>
       </Modal>
