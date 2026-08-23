@@ -27,16 +27,22 @@ export function CartProvider({ children }: { children: ReactNode }) {
       return;
     }
     setLoading(true);
-    const { data } = await supabase
-      .from('cart_items')
-      .select(`
-        *,
-        product:products(*),
-        variant:product_variants(*)
-      `)
-      .eq('user_id', user.id);
-    setItems((data as CartItem[]) ?? []);
-    setLoading(false);
+    try {
+      const { data } = await supabase
+        .from('cart_items')
+        .select(`
+          *,
+          product:products(*),
+          variant:product_variants(*)
+        `)
+        .eq('user_id', user.id);
+      setItems((data as CartItem[]) ?? []);
+    } catch (error) {
+      console.error('SILORA cart initialization failed', error);
+      setItems([]);
+    } finally {
+      setLoading(false);
+    }
   }, [user]);
 
   useEffect(() => {

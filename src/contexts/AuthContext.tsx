@@ -61,21 +61,32 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     let mounted = true;
 
-    supabase.auth.getSession().then(({ data }) => {
-      if (!mounted) return;
-      setSession(data.session);
-      if (data.session?.user) {
-        loadProfile(data.session.user.id).finally(() => mounted && setLoading(false));
-      } else {
-        setLoading(false);
-      }
-    });
+    supabase.auth.getSession()
+      .then(({ data }) => {
+        if (!mounted) return;
+        setSession(data.session);
+        if (data.session?.user) {
+          loadProfile(data.session.user.id)
+            .catch((error) => console.error('SILORA profile initialization failed', error))
+            .finally(() => mounted && setLoading(false));
+        } else {
+          setLoading(false);
+        }
+      })
+      .catch((error) => {
+        console.error('SILORA authentication initialization failed', error);
+        if (mounted) setLoading(false);
+      });
 
     const { data: sub } = supabase.auth.onAuthStateChange((_event, sess) => {
       (async () => {
         setSession(sess);
         if (sess?.user) {
-          await loadProfile(sess.user.id);
+          try {
+            await loadProfile(sess.user.id);
+          } catch (error) {
+            console.error('SILORA profile refresh failed', error);
+          }
         } else {
           setProfile(null);
           setRole(null);

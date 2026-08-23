@@ -19,24 +19,29 @@ export function HomePage() {
 
   useEffect(() => {
     async function load() {
-      const [f, t, n, b, c] = await Promise.all([
-        fetchProductsByFlag('is_featured', 10),
-        fetchProductsByFlag('is_trending', 10),
-        fetchProductsByFlag('is_new', 10),
-        fetchProductsByFlag('is_bestseller', 10),
-        fetchCategories(),
-      ]);
-      setFeatured(f);
-      setTrending(t);
-      setNewArrivals(n);
-      setBestsellers(b);
-      setCategories(c);
-      const all = [...f, ...b, ...t];
-      const offer = all
-        .filter((p) => p.original_price && discountPercent(Number(p.price), Number(p.original_price)) >= 20)
-        .sort((a, b) => discountPercent(Number(b.price), b.original_price ? Number(b.original_price) : null) - discountPercent(Number(a.price), a.original_price ? Number(a.original_price) : null))[0];
-      setSpecialOffer(offer ?? null);
-      setLoading(false);
+      try {
+        const [f, t, n, b, c] = await Promise.all([
+          fetchProductsByFlag('is_featured', 10),
+          fetchProductsByFlag('is_trending', 10),
+          fetchProductsByFlag('is_new', 10),
+          fetchProductsByFlag('is_bestseller', 10),
+          fetchCategories(),
+        ]);
+        setFeatured(f);
+        setTrending(t);
+        setNewArrivals(n);
+        setBestsellers(b);
+        setCategories(c);
+        const all = [...f, ...b, ...t];
+        const offer = all
+          .filter((p) => p.original_price && discountPercent(Number(p.price), Number(p.original_price)) >= 20)
+          .sort((a, b) => discountPercent(Number(b.price), b.original_price ? Number(b.original_price) : null) - discountPercent(Number(a.price), a.original_price ? Number(a.original_price) : null))[0];
+        setSpecialOffer(offer ?? null);
+      } catch (error) {
+        console.error('SILORA home data loading failed', error);
+      } finally {
+        setLoading(false);
+      }
     }
     load();
   }, []);

@@ -17,8 +17,14 @@ export function StoreLayout({ children }: { children: ReactNode }) {
   const onLogoTap = useSecretAdminTap(5, 2000);
 
   useEffect(() => {
-    supabase.from('categories').select('*').eq('is_active', true).order('display_order')
-      .then(({ data }) => setCategories((data as Category[]) ?? []));
+    void (async () => {
+      try {
+        const { data } = await supabase.from('categories').select('*').eq('is_active', true).order('display_order');
+        setCategories((data as Category[]) ?? []);
+      } catch (error) {
+        console.error('SILORA category navigation failed', error);
+      }
+    })();
   }, []);
 
   useEffect(() => setMobileMenu(false), [route]);
