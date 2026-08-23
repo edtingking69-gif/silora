@@ -1,5 +1,8 @@
 import { createClient } from '@supabase/supabase-js';
 
+const FALLBACK_SUPABASE_URL = 'https://configuration-missing.supabase.co';
+const FALLBACK_SUPABASE_ANON_KEY = 'configuration-missing-anon-key';
+
 function getPublicEnv(name: 'VITE_SUPABASE_URL' | 'VITE_SUPABASE_ANON_KEY'): string | null {
   const value = import.meta.env[name]?.trim();
   if (!value || value === 'your_anon_key_here' || value === 'your-publishable-key') {
@@ -8,28 +11,29 @@ function getPublicEnv(name: 'VITE_SUPABASE_URL' | 'VITE_SUPABASE_ANON_KEY'): str
   return value;
 }
 
-const supabaseUrl = getPublicEnv('VITE_SUPABASE_URL');
-const supabaseAnonKey = getPublicEnv('VITE_SUPABASE_ANON_KEY');
-
-let supabaseConfigError: string | null = null;
-if (!supabaseUrl) {
-  supabaseConfigError = 'VITE_SUPABASE_URL is missing.';
-} else if (!supabaseAnonKey) {
-  supabaseConfigError = 'VITE_SUPABASE_ANON_KEY is missing or still uses a placeholder value.';
-} else {
+const configuredSupabaseUrl = getPublicEnv('VITE_SUPABASE_URL');
+const configuredSupabaseAnonKey = getPublicEnv('VITE_SUPABASE_ANON_KEY');
+const hasValidSupabaseUrl = configuredSupabaseUrl ? (() => {
   try {
-    const parsedUrl = new URL(supabaseUrl);
-    if (parsedUrl.protocol !== 'https:' || !parsedUrl.hostname.endsWith('.supabase.co')) {
-      supabaseConfigError = 'VITE_SUPABASE_URL must be the HTTPS URL of the SILORA Supabase project.';
-    }
+    const parsedUrl = new URL(configuredSupabaseUrl);
+    return parsedUrl.protocol === 'https:' && parsedUrl.hostname.endsWith('.supabase.co');
   } catch {
-    supabaseConfigError = 'VITE_SUPABASE_URL must be a valid HTTPS URL.';
+    return false;
   }
-}
+})() : false;
 
-export { supabaseConfigError };
+export const supabaseConfigError = !configuredSupabaseUrl
+  ? 'Supabase is not configured: VITE_SUPABASE_URL is missing from the production build environment.'
+  : !hasValidSupabaseUrl
+    ? 'Supabase is not configured: VITE_SUPABASE_URL must be the HTTPS URL of the SILORA Supabase project.'
+  : !configuredSupabaseAnonKey
+    ? 'Supabase is not configured: VITE_SUPABASE_ANON_KEY is missing from the production build environment.'
+    : null;
 
-export const supabase = createClient(supabaseUrl ?? 'https://invalid.supabase.co', supabaseAnonKey ?? 'invalid-anon-key', {
+const supabaseUrl = configuredSupabaseUrl ?? FALLBACK_SUPABASE_URL;
+const supabaseAnonKey = configuredSupabaseAnonKey ?? FALLBACK_SUPABASE_ANON_KEY;
+
+export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
   auth: {
     persistSession: true,
     autoRefreshToken: true,
