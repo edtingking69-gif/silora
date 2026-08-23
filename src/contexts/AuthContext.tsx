@@ -28,6 +28,14 @@ function formatSignInError(message: string | undefined): string | null {
   return message;
 }
 
+function formatAuthError(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error ?? '');
+  if (message.toLowerCase().includes('failed to fetch')) {
+    return 'Unable to reach Supabase. Check the Cloudflare VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY build variables, then redeploy.';
+  }
+  return message || 'Authentication failed. Please try again.';
+}
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<Session | null>(null);
   const [profile, setProfile] = useState<Profile | null>(null);
@@ -94,12 +102,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       return { error: formatSignInError(error?.message) };
     },
     async signUp(email, password, fullName, mobile) {
-      const { error } = await supabase.auth.signUp({
-        email,
-        password,
-        options: { data: { full_name: fullName, mobile } },
-      });
-      return { error: error?.message ?? null };
+      try {
+        const { error } = await supabase.auth.signUp({
+          email,
+          password,
+          options: { data: { full_name: fullName, mobile } },
+        });
+        return { error: error ? formatAuthError(error) : null };
+      } catch (error) {
+        return { error: formatAuthError(error) };
+      }
     },
     async signOut() {
       await supabase.auth.signOut();

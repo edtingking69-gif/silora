@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { Link, navigate } from '@/components/router/Router';
 import { useAuth } from '@/contexts/AuthContext';
 import { useToast } from '@/contexts/ToastContext';
@@ -15,20 +15,27 @@ export function SignupPage() {
   const [confirmPassword, setConfirmPassword] = useState('');
   const [mobile, setMobile] = useState('');
   const [loading, setLoading] = useState(false);
+  const submitting = useRef(false);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
+    if (submitting.current) return;
     const normalizedMobile = mobile.replace(/\s+/g, '');
     if (!fullName || !email || !password || !confirmPassword || !normalizedMobile) { toast('Please fill all required fields', 'error'); return; }
     if (password.length < 6) { toast('Password must be at least 6 characters', 'error'); return; }
     if (password !== confirmPassword) { toast('Passwords do not match', 'error'); return; }
     if (!/^[6-9]\d{9}$/.test(normalizedMobile)) { toast('Enter a valid 10-digit Indian mobile number', 'error'); return; }
+    submitting.current = true;
     setLoading(true);
-    const { error } = await signUp(email, password, fullName, normalizedMobile);
-    setLoading(false);
-    if (error) { toast(error, 'error'); return; }
-    toast('Account created! Welcome to SILORA');
-    navigate('/account');
+    try {
+      const { error } = await signUp(email, password, fullName, normalizedMobile);
+      if (error) { toast(error, 'error'); return; }
+      toast('Account created! Welcome to SILORA');
+      navigate('/account');
+    } finally {
+      submitting.current = false;
+      setLoading(false);
+    }
   }
 
   return (

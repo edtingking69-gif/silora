@@ -1,6 +1,6 @@
 import { createClient } from '@supabase/supabase-js';
 
-const FALLBACK_SUPABASE_URL = 'https://configuration-missing.supabase.co';
+const FALLBACK_SUPABASE_URL = 'https://configuration.invalid';
 const FALLBACK_SUPABASE_ANON_KEY = 'configuration-missing-anon-key';
 
 function getPublicEnv(name: 'VITE_SUPABASE_URL' | 'VITE_SUPABASE_ANON_KEY'): string | null {
