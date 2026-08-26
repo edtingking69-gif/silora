@@ -1,4 +1,4 @@
--- Grant the requested role without storing credentials in the repository.
+-- Forward-only repair for projects where the original requested-admin migration ran early.
 INSERT INTO public.user_roles (user_id, role)
 SELECT id, 'admin'
 FROM auth.users
@@ -27,6 +27,5 @@ CREATE TRIGGER assign_requested_admin_on_signup
   FOR EACH ROW
   EXECUTE FUNCTION public.assign_requested_admin();
 
--- Keep the existing RLS authorization helper callable by the signed-in app only.
 REVOKE ALL ON FUNCTION public.is_admin() FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION public.is_admin() TO authenticated;

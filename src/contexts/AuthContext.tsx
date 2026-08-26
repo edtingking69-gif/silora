@@ -50,12 +50,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       .maybeSingle();
     setProfile(prof as Profile | null);
 
-    const { data: roles } = await supabase
-      .from('user_roles')
-      .select('role')
-      .eq('user_id', userId);
-    const adminRole = (roles as { role: UserRole }[] | null)?.find((r) => r.role === 'admin');
-    setRole(adminRole ? 'admin' : 'customer');
+    const { data: admin, error: adminError } = await supabase.rpc('is_admin');
+    if (adminError) {
+      throw adminError;
+    }
+    setRole(admin === true ? 'admin' : 'customer');
   }
 
   useEffect(() => {

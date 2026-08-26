@@ -13,7 +13,14 @@ Enter the password only in the Dashboard form. It is intentionally omitted from 
 
 ## Assign the admin role
 
-Run this in the Supabase SQL Editor after the Auth account exists:
+Apply the new repair migration `20260826102000_repair_requested_admin_assignment.sql` using the Supabase CLI or migration workflow. It is forward-only and works even if `20260826101000_assign_requested_admin.sql` was already marked applied. It does both of the following securely:
+
+- Assigns the `admin` role if the Auth account already exists.
+- Adds a trigger that assigns the same role when the account is created later.
+
+If migrations are not being applied through the CLI, run the contents of that repair migration in the Supabase SQL Editor after the Auth account exists. The SQL is idempotent.
+
+The equivalent one-time assignment is:
 
 ```sql
 DO $$
@@ -37,6 +44,8 @@ $$;
 ```
 
 The statement is idempotent: it does not create a duplicate Auth user or duplicate role.
+
+The frontend reads `public.is_admin()`, which is the same `SECURITY DEFINER` function used by the RLS policies. The migration grants that function only to authenticated users and does not add an email check to the frontend.
 
 ## Verify
 
