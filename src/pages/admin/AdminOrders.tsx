@@ -359,11 +359,6 @@ export function AdminOrders() {
                   <Button size="sm" variant="outline" onClick={() => setProofViewerOpen(true)}>View Payment Screenshot</Button>
                 </div>
               )}
-              {payments.length > 0 && payments[0].payment_reference && (
-                <p className="mt-1 text-xs text-ink-700 font-medium">
-                  Transaction Reference / UTR: <span className="font-mono font-bold">{payments[0].payment_reference}</span>
-                </p>
-              )}
               {payments.length > 0 && payments[0].submitted_at && (
                 <p className="text-xs text-ink-500">Submitted at: {formatDateTime(payments[0].submitted_at)}</p>
               )}

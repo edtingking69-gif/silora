@@ -1,4 +1,4 @@
-import { PAYMENT_PROOF_BUCKET, supabase } from '@/lib/supabase';
+import { supabase } from '@/lib/supabase';
 import type {
   Product, Category, PaymentMethod, Coupon, ShippingConfig, StoreConfig,
   Order, Payment, Address, Profile, Review,
@@ -223,8 +223,6 @@ export interface PlaceOrderInput {
   };
   couponCode?: string | null;
   paymentMethodId: string;
-  paymentProofFile?: File | null;
-  paymentAmount?: string;
 }
 
 export interface PlaceOrderResult {
@@ -234,56 +232,6 @@ export interface PlaceOrderResult {
   payment_method_name: string;
   payment_status: PaymentStatus;
   delivery_status: DeliveryStatus;
-}
-
-export async function uploadPaymentProof(file: File, userId: string, orderId: string): Promise<string> {
-  const { data, error: authError } = await supabase.auth.getUser();
-  if (authError) {
-    if (import.meta.env.DEV) console.error('Payment proof authentication check failed:', authError);
-    throw new Error('Please sign in before uploading your payment screenshot.');
-  }
-  if (!data.user) {
-    throw new Error('Please sign in before uploading your payment screenshot.');
-  }
-  if (data.user.id !== userId) {
-    throw new Error('Your session expired. Please sign in again before uploading payment proof.');
-  }
-
-  const acceptedTypes = ['image/png', 'image/jpeg', 'image/webp'];
-  if (!acceptedTypes.includes(file.type)) {
-    throw new Error('Payment screenshot must be PNG, JPG, JPEG, or WEBP and smaller than 5 MB.');
-  }
-  if (file.size > 5 * 1024 * 1024) {
-    throw new Error('Payment screenshot must be PNG, JPG, JPEG, or WEBP and smaller than 5 MB.');
-  }
-
-  const extensionByType: Record<string, string> = {
-    'image/png': 'png',
-    'image/jpeg': 'jpg',
-    'image/webp': 'webp',
-  };
-  const fileName = `payment-${crypto.randomUUID()}.${extensionByType[file.type]}`;
-  const path = `${userId}/${orderId}/${fileName}`;
-  const { error } = await supabase.storage
-    .from(PAYMENT_PROOF_BUCKET)
-    .upload(path, file, { contentType: file.type, upsert: false });
-
-  if (error) {
-    if (import.meta.env.DEV) {
-      const storageStatus = (error as typeof error & { status?: number }).status;
-      console.error('Payment proof upload failed:', {
-        error,
-        message: error.message,
-        name: error.name,
-        status: storageStatus,
-        statusCode: (error as typeof error & { statusCode?: string | number }).statusCode,
-        bucket: PAYMENT_PROOF_BUCKET,
-        path,
-      });
-    }
-    throw new Error("We couldn't upload your payment screenshot. Please try again.");
-  }
-  return path;
 }
 
 export async function createOrder(input: PlaceOrderInput): Promise<PlaceOrderResult> {
@@ -310,11 +258,6 @@ export async function createOrder(input: PlaceOrderInput): Promise<PlaceOrderRes
     throw new Error('Selected payment method is invalid or unavailable.');
   }
   const paymentMethod = pmData as PaymentMethod;
-  const requiresPaymentProof = paymentMethod.type === 'upi_qr';
-  if (requiresPaymentProof && !input.paymentProofFile) {
-    throw new Error('Please upload your payment screenshot before placing the order.');
-  }
-  const submittedAmountPaise = input.paymentAmount ? Math.round(Number(input.paymentAmount) * 100) : null;
 
   // 2. Fetch authenticated user profile / email
   const { data: userProfile } = await supabase
@@ -350,7 +293,6 @@ export async function createOrder(input: PlaceOrderInput): Promise<PlaceOrderRes
     dbVariants = vData ?? [];
   }
 
-  let calculatedSubtotal = 0;
   const verifiedOrderItems: {
     product_id: string;
     product_name: string;
@@ -396,7 +338,6 @@ export async function createOrder(input: PlaceOrderInput): Promise<PlaceOrderRes
 
     const firstImage = product.product_images?.[0]?.url || null;
 
-    calculatedSubtotal += unitPrice * item.quantity;
     verifiedOrderItems.push({
       product_id: product.id,
       product_name: product.name,
@@ -408,95 +349,25 @@ export async function createOrder(input: PlaceOrderInput): Promise<PlaceOrderRes
     });
   }
 
-  // 4. Calculate coupon discount
-  let calculatedDiscount = 0;
-  if (couponCode && couponCode.trim()) {
-    const couponValidation = await validateCoupon(couponCode, calculatedSubtotal);
-    if (couponValidation.coupon && !couponValidation.error) {
-      calculatedDiscount = couponValidation.discount;
-    }
-  }
-
-  // Shipping is free for every order.
-  const calculatedShipping = 0;
-
-  const calculatedTotal = Math.max(0, Math.round((calculatedSubtotal - calculatedDiscount + calculatedShipping) * 100) / 100);
-  if (requiresPaymentProof && (submittedAmountPaise === null || !Number.isFinite(submittedAmountPaise) || submittedAmountPaise !== Math.round(calculatedTotal * 100))) {
-    throw new Error('Payment amount does not match the order total. Please pay the exact amount shown and upload the correct payment screenshot.');
-  }
-
-  // Reserve the order ID before uploading so the proof path is scoped to this order.
-  const orderId = crypto.randomUUID();
-  let paymentProofPath: string | null = null;
-
-  if (input.paymentProofFile) {
-    paymentProofPath = await uploadPaymentProof(input.paymentProofFile, userId, orderId);
-  }
-
-  const { data: rpcData, error: rpcError } = await supabase.rpc('create_order_with_proof', {
+  const { data: rpcData, error: rpcError } = await supabase.rpc('create_order', {
     p_items: items.map((item) => ({ product_id: item.product_id, variant_id: item.variant_id, quantity: item.quantity })),
     p_address: address,
     p_coupon_code: couponCode || null,
     p_payment_method_id: paymentMethodId,
-    p_payment_proof_path: paymentProofPath,
-    p_payment_amount: requiresPaymentProof ? Number(input.paymentAmount) : null,
-    p_order_id: orderId,
   });
   if (rpcError || !rpcData) {
-    if (paymentProofPath) await supabase.storage.from(PAYMENT_PROOF_BUCKET).remove([paymentProofPath]);
     throw new Error(rpcError?.message || 'We could not place your order. Please try again.');
   }
-  const serverOrder = rpcData as PlaceOrderResult;
+  const serverOrder = rpcData as Partial<PlaceOrderResult> & { order_id: string; order_number: string; total: number };
 
   return {
     order_id: serverOrder.order_id,
     order_number: serverOrder.order_number,
     total: Number(serverOrder.total),
-    payment_method_name: serverOrder.payment_method_name,
-    payment_status: serverOrder.payment_status,
-    delivery_status: serverOrder.delivery_status,
+    payment_method_name: serverOrder.payment_method_name ?? paymentMethod.name,
+    payment_status: serverOrder.payment_status ?? 'Pending',
+    delivery_status: serverOrder.delivery_status ?? 'Pending',
   };
-}
-
-export async function submitOrderPayment(
-  orderId: string,
-  paymentMethodId: string,
-  reference?: string | null,
-): Promise<void> {
-  const newStatus: PaymentStatus = 'Payment Submitted';
-
-  // 1. Update order payment status
-  await supabase
-    .from('orders')
-    .update({ payment_status: newStatus, updated_at: new Date().toISOString() })
-    .eq('id', orderId);
-
-  // 2. Update payment record
-  await supabase
-    .from('payments')
-    .update({
-      status: newStatus,
-      payment_reference: reference || null,
-      submitted_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-    })
-    .eq('order_id', orderId);
-
-  // 3. Log history entry
-  const { data: existingPayment } = await supabase
-    .from('payments')
-    .select('id')
-    .eq('order_id', orderId)
-    .maybeSingle();
-
-  if (existingPayment) {
-    await supabase.from('payment_status_history').insert({
-      payment_id: existingPayment.id,
-      previous_status: 'Pending',
-      new_status: newStatus,
-      note: reference ? `Customer reference: ${reference}` : 'Submitted by customer (Awaiting verification between 6:00 PM - 10:00 PM)',
-    });
-  }
 }
 
 // Admin services

@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react';
 import { Link, navigate } from '@/components/router/Router';
 import { useAuth } from '@/contexts/AuthContext';
-import { fetchOrderById, fetchPaymentsByOrder, fetchOrderStatusHistory } from '@/services/api';
-import type { Order, Payment, OrderStatusHistory, DeliveryStatus } from '@/types';
+import { fetchOrderById, fetchOrderStatusHistory } from '@/services/api';
+import type { Order, OrderStatusHistory, DeliveryStatus } from '@/types';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { formatINR, formatDateTime } from '@/utils/format';
 import { ArrowLeft, Package, MapPin, CreditCard, Check, Truck, Clock, Info } from 'lucide-react';
@@ -13,7 +13,6 @@ const DELIVERY_STEPS: DeliveryStatus[] = ['Pending', 'Confirmed', 'Processing', 
 export function OrderDetailPage({ id }: { id: string }) {
   const { user } = useAuth();
   const [order, setOrder] = useState<Order | null>(null);
-  const [payments, setPayments] = useState<Payment[]>([]);
   const [history, setHistory] = useState<OrderStatusHistory[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -23,8 +22,7 @@ export function OrderDetailPage({ id }: { id: string }) {
       const o = await fetchOrderById(id, user!.id);
       setOrder(o);
       if (o) {
-        const [pays, hist] = await Promise.all([fetchPaymentsByOrder(o.id), fetchOrderStatusHistory(o.id)]);
-        setPayments(pays);
+        const hist = await fetchOrderStatusHistory(o.id);
         setHistory(hist);
       }
       setLoading(false);
@@ -183,10 +181,6 @@ export function OrderDetailPage({ id }: { id: string }) {
             </h2>
             <p className="text-sm text-ink-600">Method: <span className="font-semibold text-ink-900">{order.payment_method_name ?? 'UPI / QR'}</span></p>
             <p className="text-sm text-ink-600 mt-1">Status: <span className="font-semibold">{paymentStatusLabel}</span></p>
-            <p className="text-sm text-ink-600 mt-1">Payment screenshot: <span className="font-semibold">{order.payment_proof_path ? 'Uploaded' : 'Not uploaded'}</span></p>
-            {payments.length > 0 && payments[0].payment_reference && (
-              <p className="text-sm text-ink-600 mt-1">Reference / UTR: <span className="font-mono text-xs font-bold">{payments[0].payment_reference}</span></p>
-            )}
           </div>
 
           {/* Address */}

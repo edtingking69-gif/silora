@@ -80,7 +80,7 @@ export function AdminPayments() {
 
   const filtered = payments.filter((p) => {
     if (filter && p.status !== filter) return false;
-    if (search && !p.payment_method_name?.toLowerCase().includes(search.toLowerCase()) && !p.id.includes(search) && !p.payment_reference?.toLowerCase().includes(search.toLowerCase())) return false;
+    if (search && !p.payment_method_name?.toLowerCase().includes(search.toLowerCase()) && !p.id.includes(search)) return false;
     return true;
   });
 
@@ -91,7 +91,7 @@ export function AdminPayments() {
       <div className="flex gap-2 flex-wrap">
         <div className="relative flex-1 min-w-[180px]">
           <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-ink-400" />
-          <input type="search" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search by reference or method..." className="h-10 w-full rounded-xl border border-ink-300 bg-white pl-9 pr-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500/30" />
+          <input type="search" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search by method or payment ID..." className="h-10 w-full rounded-xl border border-ink-300 bg-white pl-9 pr-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500/30" />
         </div>
         <select value={filter} onChange={(e) => setFilter(e.target.value)} className="h-10 rounded-xl border border-ink-300 bg-white px-3 text-sm">
           <option value="">All Statuses</option>
@@ -118,9 +118,6 @@ export function AdminPayments() {
                     {isAwaitingVerification ? 'Payment Submitted — Awaiting Verification' : p.status}
                   </Badge>
                 </div>
-                {p.payment_reference && (
-                  <p className="mt-1.5 text-xs text-ink-700 font-medium">Ref / UTR: <span className="font-mono font-bold">{p.payment_reference}</span></p>
-                )}
               </button>
             );
           })}
@@ -139,9 +136,6 @@ export function AdminPayments() {
                   {selected.status === 'Payment Submitted' ? 'Payment Submitted — Awaiting Verification' : selected.status}
                 </Badge>
               </div>
-              {selected.payment_reference && (
-                <div className="flex justify-between"><span className="text-ink-600">Reference / UTR</span><span className="font-mono font-bold text-ink-900">{selected.payment_reference}</span></div>
-              )}
               {selected.submitted_at && (
                 <div className="flex justify-between"><span className="text-ink-600">Submitted</span><span>{formatDateTime(selected.submitted_at)}</span></div>
               )}

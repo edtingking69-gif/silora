@@ -9,10 +9,9 @@ import {
   fetchUserAddresses,
   validateCoupon,
   createOrder,
-  submitOrderPayment,
   type PlaceOrderResult,
 } from '@/services/api';
-import type { Address, PaymentMethod, ShippingConfig, Coupon } from '@/types';
+import type { Address, PaymentMethod, Coupon } from '@/types';
 import { Button } from '@/components/ui/Button';
 import { Input, Select } from '@/components/ui/Input';
 import { EmptyState } from '@/components/ui/EmptyState';
@@ -52,12 +51,6 @@ export function CheckoutPage() {
 
   const [placing, setPlacing] = useState(false);
   const [orderResult, setOrderResult] = useState<PlaceOrderResult | null>(null);
-  const [paymentSubmitted, setPaymentSubmitted] = useState(false);
-  const [paymentProofFile, setPaymentProofFile] = useState<File | null>(null);
-  const [paymentProofPreview, setPaymentProofPreview] = useState('');
-  const [paymentProofSubmitted, setPaymentProofSubmitted] = useState(false);
-  const [paymentAmount, setPaymentAmount] = useState('');
-  const [paymentRef, setPaymentRef] = useState('');
 
   useEffect(() => {
     if (!user) {
@@ -88,25 +81,6 @@ export function CheckoutPage() {
 
   const shipping = 0;
   const total = Math.max(0, subtotal - discount + shipping);
-
-  function handlePaymentProofFile(file: File | undefined) {
-    if (!file) return;
-    if (!['image/png', 'image/jpeg', 'image/webp'].includes(file.type)) {
-      toast('Payment screenshot must be PNG, JPG, JPEG, or WEBP.', 'error');
-      return;
-    }
-    if (file.size > 5 * 1024 * 1024) {
-      toast('Payment screenshot must be 5 MB or smaller.', 'error');
-      return;
-    }
-    setPaymentProofFile(file);
-    setPaymentProofPreview(URL.createObjectURL(file));
-  }
-
-  function removePaymentProof() {
-    setPaymentProofFile(null);
-    setPaymentProofPreview('');
-  }
 
   async function handleApplyCoupon() {
     if (!couponCode.trim()) return;
@@ -159,18 +133,6 @@ export function CheckoutPage() {
       toast('Selected payment method is unavailable', 'error');
       return;
     }
-    if (selectedPaymentMethod.type === 'upi_qr' && !paymentProofFile) {
-      toast('Please upload your payment screenshot before placing the order.', 'error');
-      return;
-    }
-    if (selectedPaymentMethod.type === 'upi_qr') {
-      const enteredPaise = Math.round(Number(paymentAmount) * 100);
-      if (!paymentAmount || !Number.isFinite(enteredPaise) || enteredPaise !== Math.round(total * 100)) {
-        toast('Payment amount does not match the order total. Please pay the exact amount shown and upload the correct payment screenshot.', 'error');
-        return;
-      }
-    }
-
     setPlacing(true);
     try {
       let addressData: {
@@ -215,12 +177,9 @@ export function CheckoutPage() {
         address: addressData,
         couponCode: appliedCoupon?.code,
         paymentMethodId: selectedMethod,
-        paymentProofFile,
-        paymentAmount,
       });
 
       setOrderResult(result);
-      setPaymentProofSubmitted(selectedPaymentMethod.type === 'upi_qr');
       await refreshCart();
       toast('Order placed successfully!');
     } catch (err) {
@@ -231,20 +190,6 @@ export function CheckoutPage() {
     }
   }
 
-  async function handleSubmitPayment() {
-    if (!orderResult || !selectedMethod) return;
-    setPlacing(true);
-    try {
-      await submitOrderPayment(orderResult.order_id, selectedMethod, paymentRef);
-      setPaymentSubmitted(true);
-      setOrderResult((prev) => (prev ? { ...prev, payment_status: 'Payment Submitted' } : null));
-      toast('Payment reference submitted for verification');
-    } catch (err) {
-      toast(err instanceof Error ? err.message : 'Failed to submit payment', 'error');
-    } finally {
-      setPlacing(false);
-    }
-  }
 
   // ============================================
   // SUCCESS ORDER CONFIRMATION SCREEN
@@ -312,15 +257,7 @@ export function CheckoutPage() {
               </p>
             </div>
 
-            {paymentProofSubmitted && (
-              <div className="mt-6 rounded-2xl border border-warning-200 bg-warning-50 p-4 text-left">
-                <p className="text-sm font-semibold text-warning-800">Payment proof uploaded — awaiting verification</p>
-                <p className="mt-1 text-xs leading-5 text-warning-700">Your screenshot was attached to the order. Our team will verify the payment manually.</p>
-              </div>
-            )}
-
-            {/* Manual UPI & QR Box for legacy/non-proof payment flows */}
-            {!paymentSubmitted && !paymentProofSubmitted && (
+            {selectedPm?.type === 'upi_qr' && (
               <div className="mt-6 rounded-2xl border border-primary-200 bg-primary-50/60 p-5 text-left">
                 <h3 className="flex items-center gap-2 text-base font-bold text-ink-900">
                   <QrCode className="h-5 w-5 text-primary-600" /> Pay with UPI
@@ -367,29 +304,6 @@ export function CheckoutPage() {
                   <p className="mt-2.5 text-xs text-ink-600 leading-relaxed">{selectedPm.instructions}</p>
                 )}
 
-                <div className="mt-3">
-                  <Input
-                    placeholder="Enter UPI UTR / Transaction Reference"
-                    value={paymentRef}
-                    onChange={(e) => setPaymentRef(e.target.value)}
-                  />
-                </div>
-
-                <Button onClick={handleSubmitPayment} loading={placing} className="mt-3 w-full" size="lg">
-                  I've Paid
-                </Button>
-                <p className="mt-2 text-center text-xs text-ink-500">
-                  Clicking "I've Paid" will submit your transaction reference to our team for verification.
-                </p>
-              </div>
-            )}
-
-            {paymentSubmitted && (
-              <div className="mt-6 rounded-2xl border border-warning-200 bg-warning-50 p-4 text-left">
-                <p className="text-sm font-semibold text-warning-800">Payment Submitted — Under Verification</p>
-                <p className="mt-1 text-xs text-warning-700">
-                  Your reference has been submitted. Our team will verify it during our verification window (6:00 PM – 10:00 PM).
-                </p>
               </div>
             )}
 
@@ -725,47 +639,9 @@ export function CheckoutPage() {
                       </div>
                     ))}
                     {pm.instructions && <p className="text-xs text-ink-600">{pm.instructions}</p>}
-                    {pm.type === 'upi_qr' && (
-                      <div className="mt-3 rounded-lg border border-primary-200 bg-white p-3">
-                        <p className="text-sm font-bold text-ink-900">Order Total: {formatINR(total)}</p>
-                        <label className="mt-2 block text-xs font-semibold text-ink-700" htmlFor="payment-amount">Amount Paid *</label>
-                        <input
-                          id="payment-amount"
-                          type="number"
-                          min="0"
-                          step="0.01"
-                          value={paymentAmount}
-                          onChange={(event) => setPaymentAmount(event.target.value)}
-                          placeholder={total.toFixed(2)}
-                          className="mt-1 h-10 w-full rounded-xl border border-ink-300 px-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500/30"
-                        />
-                      </div>
-                    )}
-                    <p className="mt-2 text-xs font-medium text-warning-700">
-                      Click "Place Order" below to create your order, then complete your payment and submit your reference for verification.
-                    </p>
                   </div>
                 );
               })()}
-
-              {paymentMethods.find((method) => method.id === selectedMethod)?.type === 'upi_qr' && (
-                <div className="mt-4 rounded-xl border border-primary-200 bg-white p-4">
-                  <p className="text-sm font-bold text-ink-900">Upload Payment Screenshot *</p>
-                  <p className="mt-1 text-xs text-ink-500">Upload proof after paying the exact order total.</p>
-                  <div className="mt-3 flex flex-wrap items-center gap-3">
-                    {paymentProofPreview && (
-                      <div className="relative h-28 w-28 overflow-hidden rounded-xl border border-ink-200 bg-white p-1">
-                        <img src={paymentProofPreview} alt="Payment screenshot preview" className="h-full w-full object-contain" />
-                        <button type="button" onClick={removePaymentProof} className="absolute right-1 top-1 rounded-full bg-error-600 p-1 text-white" aria-label="Remove payment screenshot">×</button>
-                      </div>
-                    )}
-                    <label className="flex h-28 w-40 cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed border-ink-300 text-xs font-semibold text-ink-500 hover:border-primary-400 hover:text-primary-600">
-                      <span>{paymentProofPreview ? 'Replace Screenshot' : 'Upload Payment Screenshot'}</span>
-                      <input type="file" accept="image/png,image/jpeg,image/webp" className="hidden" onChange={(event) => handlePaymentProofFile(event.target.files?.[0])} />
-                    </label>
-                  </div>
-                </div>
-              )}
 
               <div className="mt-5 flex gap-3">
                 <Button variant="outline" onClick={() => setStep(2)} className="flex-1">
