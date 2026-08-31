@@ -1,4 +1,11 @@
-import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
+import {
+  createContext,
+  useContext,
+  useEffect,
+  useState,
+  type ReactNode,
+} from 'react';
+
 import type { Session, User } from '@supabase/supabase-js';
 import { supabase } from '@/lib/supabase';
 import type { Profile, UserRole } from '@/types';
@@ -10,21 +17,37 @@ interface AuthContextValue {
   role: UserRole | null;
   isAdmin: boolean;
   loading: boolean;
-  signIn: (email: string, password: string) => Promise<{ error: string | null }>;
+
+  signIn: (
+    email: string,
+    password: string
+  ) => Promise<{ error: string | null }>;
+
   signUp: (
     email: string,
     password: string,
     fullName: string,
     mobile: string
   ) => Promise<{ error: string | null }>;
+
   signOut: () => Promise<void>;
-  resetPassword: (email: string) => Promise<{ error: string | null }>;
+
+  resetPassword: (
+    email: string
+  ) => Promise<{ error: string | null }>;
+
   refreshProfile: () => Promise<void>;
 }
 
-const AuthContext = createContext<AuthContextValue | undefined>(undefined);
+const AuthContext = createContext<AuthContextValue | undefined>(
+  undefined
+);
 
-export function AuthProvider({ children }: { children: ReactNode }) {
+export function AuthProvider({
+  children,
+}: {
+  children: ReactNode;
+}) {
   const [session, setSession] = useState<Session | null>(null);
   const [profile, setProfile] = useState<Profile | null>(null);
   const [role, setRole] = useState<UserRole | null>(null);
@@ -39,10 +62,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         .maybeSingle();
 
       if (profileError) {
-        console.error('Profile loading error:', profileError);
+        console.error('Profile error:', profileError);
       }
 
-      setProfile(prof as Profile | null);
+      setProfile((prof as Profile | null) ?? null);
 
       const { data: roles, error: roleError } = await supabase
         .from('user_roles')
@@ -50,20 +73,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         .eq('user_id', userId);
 
       if (roleError) {
-        console.error('Role loading error:', roleError);
-        setRole('customer');
-        return;
+        console.error('Role error:', roleError);
       }
 
-      const hasAdminRole = (roles ?? []).some(
-        (r) =>
-          r.role === 'admin' ||
-          r.role === 'super_admin'
-      );
+      const hasAdminRole =
+        roles?.some(
+          (item) =>
+            item.role === 'admin' ||
+            item.role === 'super_admin'
+        ) ?? false;
 
       setRole(hasAdminRole ? 'admin' : 'customer');
     } catch (error) {
       console.error('Error loading user profile:', error);
+
       setProfile(null);
       setRole('customer');
     }
@@ -72,43 +95,53 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     let mounted = true;
 
-    supabase.auth.getSession().then(({ data }) => {
+    async function initializeAuth() {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+
       if (!mounted) return;
 
-      setSession(data.session);
+      setSession(session);
 
-      if (data.session?.user) {
-        loadProfile(data.session.user.id)
-          .finally(() => {
-            if (mounted) {
-              setLoading(false);
-            }
-          });
+      if (session?.user) {
+        await loadProfile(session.user.id);
       } else {
+        setProfile(null);
+        setRole(null);
+      }
+
+      if (mounted) {
         setLoading(false);
       }
-    });
+    }
 
-    const { data: sub } = supabase.auth.onAuthStateChange(
-      (_event, sess) => {
-        (async () => {
-          setSession(sess);
+    initializeAuth();
 
-          if (sess?.user) {
-            await loadProfile(sess.user.id);
-          } else {
-            setProfile(null);
-            setRole(null);
-          }
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange(
+      async (_event, newSession) => {
+        if (!mounted) return;
 
+        setSession(newSession);
+
+        if (newSession?.user) {
+          await loadProfile(newSession.user.id);
+        } else {
+          setProfile(null);
+          setRole(null);
+        }
+
+        if (mounted) {
           setLoading(false);
-        })();
+        }
       }
     );
 
     return () => {
       mounted = false;
-      sub.subscription.unsubscribe();
+      subscription.unsubscribe();
     };
   }, []);
 
@@ -121,17 +154,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     loading,
 
     async signIn(email, password) {
-      const { error } = await supabase.auth.signInWithPassword({
-        email,
-        password,
-      });
+      const { error } =
+        await supabase.auth.signInWithPassword({
+          email,
+          password,
+        });
 
       return {
         error: error?.message ?? null,
       };
     },
 
-    async signUp(email, password, fullName, mobile) {
+    async signUp(
+      email,
+      password,
+      fullName,
+      mobile
+    ) {
       const { error } = await supabase.auth.signUp({
         email,
         password,
@@ -150,6 +189,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     async signOut() {
       await supabase.auth.signOut();
+
+      setSession(null);
       setProfile(null);
       setRole(null);
     },
@@ -177,13 +218,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   );
 }
 
-// eslint-disable-next-line react-refresh/only-export-components
 export function useAuth() {
-  const ctx = useContext(AuthContext);
+  const context = useContext(AuthContext);
 
-  if (!ctx) {
-    throw new Error('useAuth must be used within AuthProvider');
+  if (!context) {
+    throw new Error(
+      'useAuth must be used within an AuthProvider'
+    );
   }
 
-  return ctx;
+  return context;
 }
