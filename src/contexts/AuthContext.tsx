@@ -50,11 +50,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       .maybeSingle();
     setProfile(prof as Profile | null);
 
-    const { data: admin, error: adminError } = await supabase.rpc('is_admin');
-    if (adminError) {
-      throw adminError;
-    }
-    setRole(admin === true ? 'admin' : 'customer');
+    // Ask the backend for the user's role. get_user_role returns 'super_admin', 'admin', or 'customer'.
+    const { data: roleData, error: roleError } = await supabase.rpc('get_user_role');
+    if (roleError) throw roleError;
+    const resolvedRole = Array.isArray(roleData) ? (roleData[0] as any) : roleData;
+    // rpc may return plain text or a single-row; normalize to string
+    const roleText = typeof resolvedRole === 'string' ? resolvedRole : (resolvedRole?.get_user_role ?? resolvedRole?.role ?? null);
+    if (roleText === 'super_admin') setRole('super_admin');
+    else if (roleText === 'admin') setRole('admin');
+    else setRole('customer');
   }
 
   useEffect(() => {
@@ -105,7 +109,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     user: session?.user ?? null,
     profile,
     role,
-    isAdmin: role === 'admin',
+    isAdmin: role === 'admin' || role === 'super_admin',
     loading,
     async signIn(email, password) {
       const { error } = await supabase.auth.signInWithPassword({ email, password });

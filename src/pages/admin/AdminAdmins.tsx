@@ -25,7 +25,7 @@ interface AdminLookupRow {
 }
 
 export function AdminAdmins() {
-  const { user: currentUser } = useAuth();
+  const { user: currentUser, role } = useAuth();
   const { toast } = useToast();
   const [admins, setAdmins] = useState<AdminUser[]>([]);
   const [loading, setLoading] = useState(true);
@@ -106,7 +106,7 @@ export function AdminAdmins() {
     <div className="space-y-4">
       <div className="flex items-center justify-between gap-3">
         <h1 className="text-lg font-bold text-ink-900 sm:text-xl">Administrators ({admins.length})</h1>
-        <Button onClick={() => setShowAdd(true)} size="sm"><Plus className="h-4 w-4" /> Add Admin</Button>
+        {role === 'super_admin' && <Button onClick={() => setShowAdd(true)} size="sm"><Plus className="h-4 w-4" /> Add Admin</Button>}
       </div>
       <div className="flex items-start gap-2 rounded-xl bg-accent-50 p-3 text-xs text-accent-700">
         <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0" />
@@ -133,8 +133,16 @@ export function AdminAdmins() {
                 <button
                   type="button"
                   onClick={() => setRemoveId(admin.user_id)}
-                  disabled={isLastAdmin || isCurrentAdmin}
-                  title={isLastAdmin ? 'You cannot remove the last administrator.' : isCurrentAdmin ? 'You cannot remove your own administrator access.' : 'Remove Admin'}
+                  disabled={isLastAdmin || isCurrentAdmin || role !== 'super_admin'}
+                  title={
+                    role !== 'super_admin'
+                      ? 'Only the Super Admin can remove administrators.'
+                      : isLastAdmin
+                        ? 'You cannot remove the last administrator.'
+                        : isCurrentAdmin
+                          ? 'You cannot remove your own administrator access.'
+                          : 'Remove Admin'
+                  }
                   className="rounded-lg p-2 text-error-500 hover:bg-error-50 disabled:cursor-not-allowed disabled:opacity-30"
                   aria-label={`Remove admin ${admin.email}`}
                 >

@@ -85,14 +85,39 @@ export function ProductDetailPage({ id }: { id: string }) {
   }
 
   async function handleBuyNow() {
+    // Require authentication to proceed (keeps existing behaviour)
     if (!user) {
       toast('Please sign in to continue', 'info');
       navigate('/login');
       return;
     }
+
     if (outOfStock) return;
-    await addToCart(product!, selectedVariant, quantity);
-    navigate('/checkout');
+
+    // If the product has a "Size" option, require the user to select it
+    const hasSizeOption = variants.some((v) => v.name?.toLowerCase() === 'size');
+    if (hasSizeOption && (!selectedVariant || selectedVariant.name.toLowerCase() !== 'size')) {
+      toast('Please select a size before ordering', 'info');
+      return;
+    }
+
+    // Determine selected size and color values (if available)
+    const sizeValue = selectedVariant && selectedVariant.name.toLowerCase() === 'size' ? selectedVariant.value : (hasSizeOption ? '' : 'N/A');
+    const colorValue = selectedVariant && selectedVariant.name.toLowerCase() === 'color' ? selectedVariant.value : '';
+
+    // Use the effective price shown on the page
+    const priceText = formatINR(effectivePrice);
+
+    // Current page URL
+    const productUrl = typeof window !== 'undefined' ? window.location.href : '';
+
+    // Build the message exactly as requested and URL-encode it
+    const message = `Hello SILORA! 👋\n\nI would like to order this product:\n\n🛍️ Product: ${product!.name}\n💰 Price: ${priceText}\n📏 Size: ${sizeValue || 'N/A'}\n🎨 Color: ${colorValue || 'N/A'}\n🔢 Quantity: ${quantity}\n\n🔗 Product Link: ${productUrl}\n\nPlease let me know how I can complete my order.\n\nThank you! 😊`;
+
+    const waUrl = `https://wa.me/918790222258?text=${encodeURIComponent(message)}`;
+
+    // Open WhatsApp (app on mobile or web on desktop) in a new tab/window
+    window.open(waUrl, '_blank');
   }
 
   return (
